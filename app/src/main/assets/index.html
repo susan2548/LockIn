@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#faf8f1">
+  <title>พอดี</title>
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="journal.css">
+</head>
+<body>
+  <header class="app-head"><div class="head-inner">
+    <button class="wordmark" data-act="nav-today" aria-label="พอดี หน้าวันนี้"><span class="brand-mark" aria-hidden="true"><i></i><i></i></span><span>พอดี</span></button>
+    <div class="head-actions"><button class="icon-button" data-act="settings" aria-label="ตั้งค่าการแจ้งเตือน"><span data-icon="settings"></span></button><button class="add" data-act="add"><span data-icon="plus"></span> เพิ่ม</button></div>
+  </div></header>
+  <main id="page"></main>
+  <nav class="tabbar" aria-label="เมนูหลัก"><div>
+    <button data-act="nav-today" data-tab="today"><span data-icon="sun"></span><b>วันนี้</b></button>
+    <button data-act="nav-journal" data-tab="journal"><span data-icon="journal"></span><b>บันทึก</b></button>
+    <button data-act="nav-rules" data-tab="rules"><span data-icon="shield"></span><b>กฎแอป</b></button>
+  </div></nav>
+  <div id="modal" class="modal-layer" hidden></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="journal.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
