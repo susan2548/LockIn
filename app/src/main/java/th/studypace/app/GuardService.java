@@ -358,7 +358,8 @@ public final class GuardService extends AccessibilityService {
         }
         String pkg = gatePackage;
         page = new GuardPage(gate, pkg, rule.optString("name", pkg), title, activeFocus,
-                breakMinutes, () -> returnToTask(activeFocus, id, title), () -> permit(activeFocus), this::goHome);
+                breakMinutes, minutes -> returnToTask(activeFocus, id, title, minutes),
+                minutes -> permit(activeFocus, minutes), this::goHome);
         page.updateTime(end - now);
         gate.setContentView(page);
         pageKey = key;
@@ -369,10 +370,11 @@ public final class GuardService extends AccessibilityService {
         if (rule != null) Store.event(this, type, "", rule.optString("name", gatePackage), 1, note, gatePackage, "", System.currentTimeMillis());
     }
 
-    private void returnToTask(boolean activeFocus, String id, String title) {
+    private void returnToTask(boolean activeFocus, String id, String title, int minutes) {
+        if (!activeFocus && (minutes < 1 || minutes > 240)) return;
         decision("return", activeFocus ? "กลับไปทำต่อ" : "เริ่มโฟกัส");
         if (!activeFocus) {
-            Store.startFocus(this, id, title.isEmpty() ? "โฟกัส 5 นาที" : title, 5);
+            Store.startFocus(this, id, title.isEmpty() ? "โฟกัสอิสระ" : title, minutes);
         }
         Intent intent = AppRoutes.open(this, "focus");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -381,15 +383,17 @@ public final class GuardService extends AccessibilityService {
         leaveWindow();
     }
 
-    private void permit(boolean wasFocusing) {
+    private void permit(boolean wasFocusing, int minutes) {
         long wall = System.currentTimeMillis();
-        if (wasFocusing && focusing(wall)) {
+        if (minutes < 1 || minutes > 120) return;
+        if (wasFocusing != focusing(wall)) { evaluate(); return; }
+        if (wasFocusing) {
             exceptionPackage = gatePackage;
             exceptionFocusStart = focus.optLong("start");
-            exceptionEnd = Math.min(focus.optLong("end"), wall + 5 * 60000L);
+            exceptionEnd = Math.min(focus.optLong("end"), wall + minutes * 60000L);
             decision("open", "เปิดเฉพาะแอปนี้ชั่วคราว");
         } else {
-            groupRemaining = breakMinutes * 60000L;
+            groupRemaining = minutes * 60000L;
             decision("open", "เริ่มเวลาพักร่วม");
         }
         saveMeter();
@@ -411,6 +415,10 @@ public final class GuardService extends AccessibilityService {
     void goHome() {
         performGlobalAction(GLOBAL_ACTION_HOME);
         leaveWindow();
+    }
+
+    void backFromGate() {
+        if (page == null || !page.dismissDuration()) goHome();
     }
 
     private void closeGate() {

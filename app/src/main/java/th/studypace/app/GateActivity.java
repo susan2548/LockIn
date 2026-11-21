@@ -61,6 +61,6 @@ public final class GateActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (service != null) service.goHome(); else finishAndRemoveTask();
+        if (service != null) service.backFromGate(); else finishAndRemoveTask();
     }
 }

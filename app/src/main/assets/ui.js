@@ -418,7 +418,75 @@
     }).join("") + "</div><div class=\"task-list\">" + (selected.length ? selected.map(taskRow).join("") : "<p class=\"empty-line\">" + (filter === "now" ? "ยังไม่มีงานที่ต้องทำวันนี้" : filter === "later" ? "ยังไม่มีงานที่กำหนดไว้ล่วงหน้า" : "งานที่ทำเสร็จจะอยู่ที่นี่") + "</p>") + "</div></section><section class=\"section\"><div class=\"section-head\"><h2>กิจวัตร</h2>" + btn("new-habit", "เพิ่มกิจวัตร", "subtle-button", null, "plus") + "</div><div class=\"task-list\">" + (state.habits.map(habitRow).join("") || "<p class=\"empty-line\">เพิ่มกิจวัตรที่อยากทำเป็นประจำ</p>") + "</div></section><button class=\"history-link\" data-act=\"nav-journal\">ดูบันทึกประจำวัน " + icon("right") + "</button>";
   }
   function inputField(name, label, type, value, extra) {
+    if (type === "time") {
+      return '<div class="time-field"><span id="' + name + '-label">' + h(label) + '</span>' +
+        '<input type="hidden" id="' + name + '" value="' + h(value || "") + '">' +
+        '<button type="button" class="time-trigger" data-act="pick-time" data-id="' + name +
+        '" aria-haspopup="dialog" aria-labelledby="' + name + '-label ' + name + '-value">' +
+        icon("clock") + '<b id="' + name + '-value">' + h(value || "เลือกเวลา") + '</b>' + icon("chevron") + '</button></div>';
+    }
     return "<label class=\"field\">" + h(label) + "<input id=\"" + h(name) + "\" type=\"" + h(type) + "\" value=\"" + h(value) + "\" " + (extra || "") + "></label>";
+  }
+  function openTimePicker(name) {
+    var field = el(name), parent = overlay.querySelector(".sheet");
+    if (!field || !parent || el("time-picker")) return;
+    var now = new Date();
+    var parts = (field.value || pad(now.getHours()) + ":" + pad(now.getMinutes())).split(":");
+    var editor = document.createElement("section");
+    editor.className = "sheet time-sheet";
+    editor.id = "time-picker";
+    editor.dataset.field = name;
+    editor.setAttribute("role", "dialog");
+    editor.setAttribute("aria-modal", "true");
+    editor.setAttribute("aria-labelledby", "time-title");
+    function digits(id, label, value) {
+      return '<label class="clock-part"><span>' + label + '</span><input id="' + id +
+        '" inputmode="numeric" type="text" maxlength="2" autocomplete="off" value="' + h(value) + '"></label>';
+    }
+    editor.innerHTML = '<div class="grip"></div><div class="sheet-head"><h2 id="time-title">เลือกเวลา</h2>' +
+      '<button class="icon-button" data-act="cancel-time" aria-label="ยกเลิก">' + icon("close") + '</button></div>' +
+      '<p class="time-context">' + h(el(name + "-label").textContent) + ' · 24 ชั่วโมง</p>' +
+      '<div class="clock-editor">' + digits("clock-hour", "ชั่วโมง", parts[0]) + '<b aria-hidden="true">:</b>' +
+      digits("clock-minute", "นาที", parts[1]) + '</div><div class="time-shortcuts">' +
+      ["07:00","12:00","18:00","21:00"].map(function (v) {return btn("preset-time", v, "time-chip", v);}).join("") +
+      '</div><p class="error" id="clock-error" role="alert"></p><div class="choice-footer">' +
+      btn("clear-time", "ล้างเวลา", "subtle-button") + btn("apply-time", "ใช้เวลานี้", "primary") + '</div>';
+    parent.hidden = true;
+    overlay.appendChild(editor);
+    markTimePreset();
+    paintIcons(editor);
+    editor.querySelector(".icon-button").focus({preventScroll:true});
+  }
+  function markTimePreset() {
+    var hour = v("clock-hour"), minute = v("clock-minute");
+    var value = hour && minute ? pad(Number(hour)) + ":" + pad(Number(minute)) : "";
+    el("time-picker").querySelectorAll("[data-act=preset-time]").forEach(function (chip) {
+      chip.setAttribute("aria-pressed", chip.dataset.id === value);
+    });
+  }
+  function closeTimePicker(save, value) {
+    var editor = el("time-picker");
+    if (!editor) return false;
+    var name = editor.dataset.field;
+    if (save) {
+      el(name).value = value;
+      el(name + "-value").textContent = value || "เลือกเวลา";
+      if (name === "daily-time") el("daily-on").checked = Boolean(value);
+    }
+    editor.remove();
+    overlay.querySelector(".sheet").hidden = false;
+    overlay.querySelector('[data-act="pick-time"][data-id="' + name + '"]').focus({preventScroll:true});
+    return true;
+  }
+  function applyTime() {
+    var hour = v("clock-hour"), minute = v("clock-minute");
+    function valid(value, max) {return /^[0-9]{1,2}$/.test(value) && Number(value) <= max;}
+    if (!valid(hour, 23) || !valid(minute, 59)) {
+      el("clock-error").textContent = "ใส่ชั่วโมง 0–23 และนาที 0–59";
+      el(valid(hour, 23) ? "clock-minute" : "clock-hour").focus();
+      return;
+    }
+    closeTimePicker(true, pad(Number(hour)) + ":" + pad(Number(minute)));
   }
   function noteField(value) {
     return "<label class=\"field\">บันทึกว่าทำถึงไหน<textarea id=\"task-note\" maxlength=\"600\" placeholder=\"เช่น ครั้งหน้าเริ่มข้อ 3\">" + h(value || "") + "</textarea></label>";
@@ -432,8 +500,10 @@
       error.textContent = msg;
     else
       toast(msg);
-    if (field)
-      el(field).focus();
+    if (field) {
+      var control = overlay.querySelector('[data-act="pick-time"][data-id="' + field + '"]') || el(field);
+      if (control) control.focus();
+    }
     return false;
   }
   function v(k) {
@@ -495,6 +565,18 @@
     render();
     toast(x.done ? "เปิดงานอีกครั้งแล้ว" : "บันทึกว่างานเสร็จแล้ว");
   }
+  function habitPeriod(period) {
+    function choice(value, text) {
+      return '<label><input type="radio" name="habit-period" value="' + value + '"' + (value === period ? ' checked' : '') +
+        '><span>' + text + '</span></label>';
+    }
+    return '<fieldset class="period-field"><legend>รอบเป้าหมาย</legend><div class="segments">' +
+      choice("day", "รายวัน") + choice("week", "รายสัปดาห์") + '</div><p id="period-help" aria-live="polite">' +
+      periodHelp(period) + '</p></fieldset>';
+  }
+  function periodHelp(period) {
+    return period === "week" ? "สะสมยอดตั้งแต่จันทร์ถึงอาทิตย์ เริ่มนับใหม่ทุกวันจันทร์" : "สะสมยอดภายในวันเดียว เริ่มนับใหม่ตอนเที่ยงคืน";
+  }
   function habitEditor(ref) {
     var x = getHabit(ref) || {
       title: "",
@@ -503,7 +585,7 @@
       unit: "ครั้ง",
       time: ""
     };
-    sheet("habit-editor", ref ? "แก้ไขกิจวัตร" : "เพิ่มกิจวัตร", inputField("habit-title", "ชื่อกิจวัตร", "text", x.title, "maxlength=\"100\" placeholder=\"เช่น เดินหลังเลิกเรียน\"") + "<div class=\"fields-2\">" + inputField("habit-goal", "เป้าหมาย", "number", x.goal, "min=\"1\" max=\"999\" step=\"1\"") + inputField("habit-unit", "หน่วย", "text", x.unit, "maxlength=\"22\"") + "</div><label class=\"field\">เริ่มนับเป้าใหม่<select id=\"habit-period\"><option value=\"day\" " + (x.period === "day" ? "selected" : "") + ">ทุกวัน</option><option value=\"week\" " + (x.period === "week" ? "selected" : "") + ">ทุกสัปดาห์ (วันจันทร์)</option></select></label>" + inputField("habit-time", "เวลาเตือนในแต่ละวัน (ถ้ามี)", "time", x.time) + footer("save-habit", "บันทึกกิจวัตร", ref ? "delete-habit" : null, ref), ref);
+    sheet("habit-editor", ref ? "แก้ไขกิจวัตร" : "เพิ่มกิจวัตร", inputField("habit-title", "ชื่อกิจวัตร", "text", x.title, "maxlength=\"100\" placeholder=\"เช่น เดินหลังเลิกเรียน\"") + "<div class=\"fields-2\">" + inputField("habit-goal", "เป้าหมาย", "number", x.goal, "min=\"1\" max=\"999\" step=\"1\"") + inputField("habit-unit", "หน่วย", "text", x.unit, "maxlength=\"22\"") + "</div>" + habitPeriod(x.period === "week" ? "week" : "day") + inputField("habit-time", "เวลาเตือนในวันที่ยังไม่ครบเป้า (ถ้ามี)", "time", x.time) + footer("save-habit", "บันทึกกิจวัตร", ref ? "delete-habit" : null, ref), ref);
   }
   function saveHabit(ref) {
     var title = v("habit-title"), unit = v("habit-unit"), goal = Number(v("habit-goal"));
@@ -519,7 +601,7 @@
         title: title,
         unit: unit,
         goal: goal,
-        period: v("habit-period"),
+        period: overlay.querySelector('input[name="habit-period"]:checked').value,
         time: v("habit-time")
       };
     put("habits", prev ? state.habits.map(function (t) {
@@ -543,14 +625,21 @@
       return;
     }
     var t = getTask(ref);
-    sheet("duration", "เริ่มรอบโฟกัส", "<p class=\"small-spaced\">" + h(t ? t.title : "โฟกัสอิสระ") + "</p><div class=\"plain-group\">" + [
-      5,
-      15,
-      25,
-      50
-    ].map(function (m) {
-      return btn("start-" + m, m + " นาที", "pill", ref);
-    }).join("") + "</div>" + inputField("focus-minutes", "หรือกำหนดเอง (นาที)", "number", "25", "min=\"1\" max=\"240\" step=\"1\"") + footer("start-custom", "เริ่มจับเวลา", null, ref), ref);
+    sheet("duration", "เวลาโฟกัส", '<p class="time-context">' + h(t ? t.title : "โฟกัสอิสระ") +
+      '</p>' + durationFields("focus-minutes", 25, 240, [5,15,25,50]) + footer("start-custom", "เริ่มโฟกัส", null, ref), ref);
+  }
+  function durationFields(field, value, max, presets) {
+    return '<div class="duration-field">' + inputField(field, "กำหนดระยะเวลา (นาที)", "number", value,
+      'inputmode="numeric" min="1" max="' + max + '" step="1"') + '<div class="time-shortcuts">' +
+      presets.map(function (minutes) {
+        return '<button class="time-chip" data-act="set-minutes" data-id="' + minutes + '" aria-pressed="' +
+          (minutes === value) + '">' + minutes + ' นาที</button>';
+      }).join("") + '</div><p class="time-context">เลือกได้ 1–' + max + ' นาที</p></div>';
+  }
+  function markDuration(field) {
+    field.closest(".duration-field").querySelectorAll(".time-chip").forEach(function (chip) {
+      chip.setAttribute("aria-pressed", Number(chip.dataset.id) === Number(field.value));
+    });
   }
   function showFocus() {
     var f = state.focus;
@@ -602,8 +691,25 @@
     return '<span class="app-monogram" aria-hidden="true">' + h(Array.from(name || pkg || "•")[0]) + image + '</span>';
   }
   function appRuleRow(pkg, record) {
-    var mode = record.mode;
-    return "<div class=\"list-row rule-app\">" + appIcon(pkg, record.name) + "<span class=\"row-main\"><strong>" + h(record.name || pkg) + "</strong></span><select class=\"rule-mode\" data-pkg=\"" + h(pkg) + "\" aria-label=\"กฎสำหรับ " + h(record.name) + "\"><option value=\"always\" " + (mode === "always" ? "selected" : "") + ">คั่นทุกครั้ง</option><option value=\"focus\" " + (mode === "focus" ? "selected" : "") + ">เฉพาะโฟกัส</option><option value=\"remove\">เอาออก</option></select></div>";
+    var mode = record.mode === "focus" ? "เฉพาะโฟกัส" : "คั่นทุกครั้ง";
+    return '<div class="list-row rule-app">' + appIcon(pkg, record.name) + '<span class="row-main"><strong>' +
+      h(record.name || pkg) + '</strong></span><button class="rule-mode" aria-haspopup="dialog" data-act="edit-rule" data-id="' +
+      h(pkg) + '" aria-label="' + h((record.name || pkg) + " · " + mode) + '">' + mode + icon("chevron") + '</button></div>';
+  }
+  function editRule(pkg) {
+    var app = state.rules.apps[pkg];
+    if (!app) return;
+    function option(value, title, description, glyph) {
+      var selected = app.mode === value;
+      return '<button class="mode-option" data-act="use-rule" data-id="' + value + '" aria-pressed="' + selected + '">' +
+        '<span class="mode-glyph">' + icon(glyph) + '</span><span class="row-main"><strong>' + title + '</strong><small>' +
+        description + '</small></span><span class="choice-dot" aria-hidden="true">' + (selected ? '✓' : '') + '</span></button>';
+    }
+    var name = app.name || pkg;
+    sheet("rule", "ตั้งหน้าคั่น", '<div class="rule-identity">' + appIcon(pkg, name) + '<b>' + h(name) + '</b></div><div class="mode-options">' +
+      option("always", "คั่นทุกครั้ง", "คั่นเมื่อเปิดแอป ยกเว้นช่วงพักที่คุณเลือก", "shield") +
+      option("focus", "เฉพาะตอนโฟกัส", "ใช้งานได้ตามปกตินอกรอบโฟกัส", "clock") + '</div>' +
+      btn("remove-rule", "เอาออกจากรายการคั่น", "remove-rule"), pkg);
   }
   function offerReminderPermission() {
     if (!bridge || notifsOn() || state.rules.reminderPromptShown)
@@ -615,7 +721,7 @@
     var rules = state.rules, apps = Object.keys(rules.apps), enabled = guardOn();
     return "<div class=\"title-line\"><div><h1 class=\"page-title\">กฎแอป</h1><p class=\"small-spaced\">เลือกแอปที่อยากหยุดคิดสักนิดก่อนเปิด</p></div></div><div class=\"status-box\"><h3>" + (enabled ? "หน้าคั่นเปิดใช้งานแล้ว" : "เปิดหน้าคั่นบนเครื่อง") + "</h3><p>" + (enabled ? "กฎจะทำงานเมื่อเปิดแอปที่เลือก" : "เปิดบริการ Lock In ในเมนูการช่วยเหลือพิเศษ เพื่อให้ตรวจชื่อแอปที่อยู่หน้าจอและคั่นแอปที่เลือก") + "</p>" + btn("guard-settings", enabled ? "ดูการตั้งค่า Android" : "เปิดการตั้งค่า Android", "secondary") + "</div><div class=\"section\"><div class=\"section-head\"><h2>แอปที่อยากลด <span class=\"mini-count\">" + apps.length + "</span></h2>" + btn("apps", "เลือกแอป", "subtle-button", null, "plus") + "</div><div class=\"task-list\">" + (apps.length ? apps.map(function (p) {
       return appRuleRow(p, rules.apps[p]);
-    }).join("") : "<p class=\"empty-line\">ยังไม่ได้เลือกแอป · เพิ่ม TikTok, Facebook, IG หรือแอปอื่นบนเครื่องได้</p>") + "</div></div><div class=\"section\"><div class=\"section-head\"><h2>เวลาพักร่วมกัน</h2></div><button class=\"option fill\" data-act=\"break-settings\"><span class=\"icon-soft peach\">" + icon("clock") + "</span><span class=\"row-main\"><strong>" + h(rules.breakMinutes || 5) + " นาทีต่อรอบ</strong><small>นับต่อเมื่อสลับระหว่างแอปที่เลือก</small></span>" + icon("right") + "</button></div>";
+    }).join("") : "<p class=\"empty-line\">ยังไม่ได้เลือกแอป · เพิ่ม TikTok, Facebook, IG หรือแอปอื่นบนเครื่องได้</p>") + "</div></div><div class=\"section\"><div class=\"section-head\"><h2>เวลาพักร่วมกัน</h2></div><button class=\"option fill\" data-act=\"break-settings\"><span class=\"icon-soft peach\">" + icon("clock") + "</span><span class=\"row-main\"><strong>" + h(rules.breakMinutes || 5) + " นาทีเป็นค่าเริ่มต้น</strong><small>ปรับระยะเวลาของแต่ละรอบได้ที่หน้าคั่น</small></span>" + icon("right") + "</button></div>";
   }
   function appsPicker() {
     appList = appNames().slice().sort(function (a, b) {
@@ -650,7 +756,8 @@
     put("rules", Object.assign({}, state.rules, { apps: apps }));
   }
   function showBreak() {
-    sheet("break", "เวลาพักร่วมกัน", inputField("break-min", "ดูแอปในกลุ่มได้รอบละ (นาที)", "number", state.rules.breakMinutes || 5, "min=\"1\" max=\"120\" step=\"1\"") + footer("save-break", "บันทึก"));
+    sheet("break", "เวลาพักเริ่มต้น", '<p class="time-context">ใช้ร่วมกันระหว่างแอปที่คั่น คุณเปลี่ยนเวลาสำหรับแต่ละรอบที่หน้าคั่นได้</p>' +
+      durationFields("break-min", Number(state.rules.breakMinutes) || 5, 120, [5,10,15,30]) + footer("save-break", "บันทึก"));
   }
   function settings() {
     var rules = state.rules, n = notifsOn();
@@ -737,6 +844,34 @@
   }
   function handle(action, ref) {
     switch (action) {
+    case "pick-time":
+      openTimePicker(ref);
+      break;
+    case "preset-time":
+      el("clock-hour").value = ref.slice(0, 2);
+      el("clock-minute").value = ref.slice(3);
+      el("clock-error").textContent = "";
+      markTimePreset();
+      break;
+    case "apply-time":
+      applyTime();
+      break;
+    case "clear-time":
+      closeTimePicker(true, "");
+      break;
+    case "cancel-time":
+      closeTimePicker(false);
+      break;
+    case "edit-rule":
+      editRule(ref);
+      break;
+    case "use-rule":
+    case "remove-rule":
+      updateMode(detail, action === "use-rule" ? ref : "remove");
+      closeSheet();
+      render();
+      toast(action === "use-rule" ? "บันทึกกฎแล้ว" : "เอาแอปออกจากรายการแล้ว");
+      break;
     case "nav-today":
       go("today");
       break;
@@ -814,11 +949,10 @@
       }
       begin(ref, minutes);
       break;
-    case "start-5":
-    case "start-15":
-    case "start-25":
-    case "start-50":
-      begin(ref, Number(action.slice(6)));
+    case "set-minutes":
+      var amount = overlay.querySelector(".duration-field input");
+      amount.value = ref;
+      markDuration(amount);
       break;
     case "focus":
       showFocus();
@@ -911,7 +1045,7 @@
   }
   document.addEventListener("click", function (e) {
     if (e.target === overlay) {
-      closeSheet();
+      if (!closeTimePicker(false)) closeSheet();
       return;
     }
     var b = e.target.closest("[data-act]");
@@ -920,19 +1054,25 @@
     }
   });
   document.addEventListener("input", function (e) {
+    if (e.target.id === "clock-hour" || e.target.id === "clock-minute") {
+      el("clock-error").textContent = "";
+      markTimePreset();
+    }
+    if (e.target.matches(".duration-field input")) markDuration(e.target);
     if (e.target.id === "app-search") {
       appSearch = e.target.value;
       paintPicker();
     }
   });
   document.addEventListener("change", function (e) {
-    if (e.target.classList.contains("rule-mode")) {
-      updateMode(e.target.dataset.pkg, e.target.value);
-      render();
-      toast("บันทึกกฎแล้ว");
-    }
+    if (e.target.name === "habit-period") el("period-help").textContent = periodHelp(e.target.value);
   });
+  function selectClockDigits(e) {
+    if (e.target.id === "clock-hour" || e.target.id === "clock-minute") e.target.select();
+  }
+  overlay.addEventListener("focusin", selectClockDigits);
   function back() {
+    if (closeTimePicker(false)) return true;
     if (window.PordeeJournal && window.PordeeJournal.closeDialog && window.PordeeJournal.closeDialog())
       return true;
     if (modal) {
@@ -946,10 +1086,11 @@
     return false;
   }
   document.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && (e.target.id === "clock-hour" || e.target.id === "clock-minute")) { e.preventDefault(); applyTime(); }
     if (e.key === "Escape" && back())
       e.preventDefault();
     if (e.key === "Tab" && modal) {
-      var nodes = overlay.querySelectorAll("button:not([disabled]),input:not([disabled]),textarea,select");
+      var nodes = overlay.querySelector(".sheet:not([hidden])").querySelectorAll("button:not([disabled]),input:not([type=hidden]):not([disabled]),textarea,select");
       if (!nodes.length)
         return;
       var first = nodes[0], last = nodes[nodes.length - 1];
