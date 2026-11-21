@@ -369,6 +369,32 @@
     var kind = x.id === "water" ? "water" : x.id === "exercise" ? "exercise" : "leaf";
     return "<div class=\"habit-row\"><span class=\"icon-soft " + (kind === "exercise" ? "peach" : "") + "\">" + icon(kind) + "</span><button class=\"row-main\" data-act=\"edit-habit\" data-id=\"" + h(x.id) + "\"><strong>" + h(x.title) + "</strong><small>" + n + " / " + h(x.goal) + " " + h(x.unit) + (x.period === "week" ? " สัปดาห์นี้" : " วันนี้") + "</small><span class=\"mini-progress\"><i style=\"width:" + Math.min(100, 100 * n / Math.max(1, x.goal)) + "%\"></i></span></button><button data-act=\"habit-plus\" data-id=\"" + h(x.id) + "\" class=\"round-step\" aria-label=\"" + h(x.title + " เพิ่มหนึ่ง" + x.unit) + "\">" + icon("plus") + "</button></div>";
   }
+  function streakPanel() {
+    var totals = Object.create(null);
+    state.events.forEach(function (event) {
+      if (event.type !== "focus" || !(event.value > 0)) return;
+      var date = event.day || key(new Date(event.at));
+      totals[date] = (totals[date] || 0) + Number(event.value);
+    });
+    var now = new Date(), todayKey = key(now);
+    var cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+    if (!(totals[todayKey] >= 300)) cursor.setDate(cursor.getDate() - 1);
+    var streak = 0;
+    while (totals[key(cursor)] >= 300) {
+      streak++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (now.getDay() + 6) % 7, 12);
+    var weekdays = ["จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส.", "อา."];
+    var week = weekdays.map(function (day) {
+      var date = key(cursor), done = totals[date] >= 300;
+      var label = fmtDay(cursor, {weekday:"long", day:"numeric", month:"short"}) + (done ? " ถึงเป้าหมาย" : date === todayKey ? " วันนี้" : "");
+      var cell = '<li class="' + (done ? "hit " : "") + (date === todayKey ? "current" : "") + '" aria-label="' + h(label) + '"><span>' + day + '</span><b>' + (done ? "✓" : cursor.getDate()) + '</b></li>';
+      cursor.setDate(cursor.getDate() + 1);
+      return cell;
+    }).join("");
+    return '<section class="streak-panel" aria-label="สถิติโฟกัสต่อเนื่อง"><div class="streak-title"><h2>โฟกัสต่อเนื่อง</h2><strong>' + streak + ' วัน</strong></div><ol class="streak-week">' + week + '</ol><p>สะสมโฟกัสให้ครบ 5 นาทีต่อวัน นับจากรอบที่จบแล้ว</p></section>';
+  }
   function todayPage() {
     var tasks = planned(), f = state.focus, heroTask = tasks[0], selected = filter === "now" ? tasks : state.tasks.filter(function (t) {
         return filter === "later" ? !t.done && t.date > today() : t.done;
@@ -379,7 +405,7 @@
       day: "numeric",
       month: "long",
       year: "numeric"
-    })) + "</p><h1 class=\"page-title\">วันนี้</h1></div></div><section class=\"hero\"><div class=\"hero-art\" aria-hidden=\"true\"><i></i><i></i></div>" + hero + "</section><section class=\"section\"><div class=\"section-head\"><h2>รายการงาน</h2>" + btn("new-task", "เพิ่มงาน", "subtle-button", null, "plus") + "</div><div class=\"plain-group\" style=\"margin-bottom:10px\">" + [
+    })) + "</p><h1 class=\"page-title\">วันนี้</h1></div></div><section class=\"hero\"><div class=\"hero-copy\">" + hero + "</div><img class=\"hero-art\" src=\"lockin-mark.webp\" alt=\"\"></section>" + streakPanel() + "<section class=\"section\"><div class=\"section-head\"><h2>รายการงาน</h2>" + btn("new-task", "เพิ่มงาน", "subtle-button", null, "plus") + "</div><div class=\"plain-group\" style=\"margin-bottom:10px\">" + [
       "now",
       "later",
       "done"
@@ -571,12 +597,13 @@
       }
     ];
   }
-  function initial(name) {
-    return h(Array.from(name || "•")[0]);
+  function appIcon(pkg, name) {
+    var image = bridge ? '<img loading="lazy" decoding="async" alt="" src="/icons/' + encodeURIComponent(pkg) + '.png" onerror="this.remove()">' : "";
+    return '<span class="app-monogram" aria-hidden="true">' + h(Array.from(name || pkg || "•")[0]) + image + '</span>';
   }
   function appRuleRow(pkg, record) {
     var mode = record.mode;
-    return "<div class=\"list-row rule-app\"><div class=\"icon-soft app-monogram\">" + initial(record.name) + "</div><span class=\"row-main\"><strong>" + h(record.name || pkg) + "</strong></span><select class=\"rule-mode\" data-pkg=\"" + h(pkg) + "\" aria-label=\"กฎสำหรับ " + h(record.name) + "\"><option value=\"always\" " + (mode === "always" ? "selected" : "") + ">คั่นทุกครั้ง</option><option value=\"focus\" " + (mode === "focus" ? "selected" : "") + ">เฉพาะโฟกัส</option><option value=\"remove\">เอาออก</option></select></div>";
+    return "<div class=\"list-row rule-app\">" + appIcon(pkg, record.name) + "<span class=\"row-main\"><strong>" + h(record.name || pkg) + "</strong></span><select class=\"rule-mode\" data-pkg=\"" + h(pkg) + "\" aria-label=\"กฎสำหรับ " + h(record.name) + "\"><option value=\"always\" " + (mode === "always" ? "selected" : "") + ">คั่นทุกครั้ง</option><option value=\"focus\" " + (mode === "focus" ? "selected" : "") + ">เฉพาะโฟกัส</option><option value=\"remove\">เอาออก</option></select></div>";
   }
   function offerReminderPermission() {
     if (!bridge || notifsOn() || state.rules.reminderPromptShown)
@@ -586,7 +613,7 @@
   }
   function rulesPage() {
     var rules = state.rules, apps = Object.keys(rules.apps), enabled = guardOn();
-    return "<div class=\"title-line\"><div><h1 class=\"page-title\">กฎแอป</h1><p class=\"small-spaced\">เลือกแอปที่อยากหยุดคิดสักนิดก่อนเปิด</p></div></div><div class=\"status-box\"><h3>" + (enabled ? "หน้าคั่นเปิดใช้งานแล้ว" : "เปิดหน้าคั่นบนเครื่อง") + "</h3><p>" + (enabled ? "กฎจะทำงานเมื่อเปิดแอปที่เลือก" : "เปิดบริการ พอดี ในเมนูการช่วยเหลือพิเศษ เพื่อให้รู้ว่าคุณเปิดแอปที่เลือกและแสดงหน้าคั่น") + "</p>" + btn("guard-settings", enabled ? "ดูการตั้งค่า Android" : "เปิดการตั้งค่า Android", "secondary") + "</div><div class=\"section\"><div class=\"section-head\"><h2>แอปที่อยากลด <span class=\"mini-count\">" + apps.length + "</span></h2>" + btn("apps", "เลือกแอป", "subtle-button", null, "plus") + "</div><div class=\"task-list\">" + (apps.length ? apps.map(function (p) {
+    return "<div class=\"title-line\"><div><h1 class=\"page-title\">กฎแอป</h1><p class=\"small-spaced\">เลือกแอปที่อยากหยุดคิดสักนิดก่อนเปิด</p></div></div><div class=\"status-box\"><h3>" + (enabled ? "หน้าคั่นเปิดใช้งานแล้ว" : "เปิดหน้าคั่นบนเครื่อง") + "</h3><p>" + (enabled ? "กฎจะทำงานเมื่อเปิดแอปที่เลือก" : "เปิดบริการ Lock In ในเมนูการช่วยเหลือพิเศษ เพื่อให้ตรวจชื่อแอปที่อยู่หน้าจอและคั่นแอปที่เลือก") + "</p>" + btn("guard-settings", enabled ? "ดูการตั้งค่า Android" : "เปิดการตั้งค่า Android", "secondary") + "</div><div class=\"section\"><div class=\"section-head\"><h2>แอปที่อยากลด <span class=\"mini-count\">" + apps.length + "</span></h2>" + btn("apps", "เลือกแอป", "subtle-button", null, "plus") + "</div><div class=\"task-list\">" + (apps.length ? apps.map(function (p) {
       return appRuleRow(p, rules.apps[p]);
     }).join("") : "<p class=\"empty-line\">ยังไม่ได้เลือกแอป · เพิ่ม TikTok, Facebook, IG หรือแอปอื่นบนเครื่องได้</p>") + "</div></div><div class=\"section\"><div class=\"section-head\"><h2>เวลาพักร่วมกัน</h2></div><button class=\"option fill\" data-act=\"break-settings\"><span class=\"icon-soft peach\">" + icon("clock") + "</span><span class=\"row-main\"><strong>" + h(rules.breakMinutes || 5) + " นาทีต่อรอบ</strong><small>นับต่อเมื่อสลับระหว่างแอปที่เลือก</small></span>" + icon("right") + "</button></div>";
   }
@@ -607,7 +634,7 @@
     });
     root.innerHTML = entries.length ? entries.map(function (a) {
       var checked = !!state.rules.apps[a.pkg];
-      return "<button class=\"picker-item\" data-act=\"pick-app\" data-id=\"" + h(a.pkg) + "\" aria-pressed=\"" + checked + "\"><span class=\"icon-soft app-monogram\">" + initial(a.name) + "</span><span class=\"row-main\">" + h(a.name) + "</span><span class=\"mark\">" + (checked ? "เลือกแล้ว" : "เพิ่ม") + "</span></button>";
+      return "<button class=\"picker-item\" data-act=\"pick-app\" data-id=\"" + h(a.pkg) + "\" aria-pressed=\"" + checked + "\">" + appIcon(a.pkg, a.name) + "<span class=\"row-main\">" + h(a.name) + "</span><span class=\"mark\">" + (checked ? "เลือกแล้ว" : "เพิ่ม") + "</span></button>";
     }).join("") : "<p class=\"empty-line\">ไม่พบแอปที่ตรงกับการค้นหา</p>";
   }
   function updateMode(pkg, mode, name) {
@@ -627,7 +654,7 @@
   }
   function settings() {
     var rules = state.rules, n = notifsOn();
-    sheet("settings", "การแจ้งเตือน", "<div class=\"setting-group\"><h3>การแจ้งเตือนของเครื่อง</h3><p class=\"small\">" + (n ? "เปิดรับการแจ้งเตือนแล้ว" : "อนุญาตให้พอดีเตือนงาน กิจวัตร และสรุปบันทึก") + "</p>" + (n ? "" : btn("notifications", "อนุญาตการแจ้งเตือน", "secondary")) + "</div>" + inputField("daily-time", "เวลาแจ้งสรุปวัน และสรุปเดือนเมื่อขึ้นเดือนใหม่", "time", rules.dailyTime) + "<label class=\"line-toggle\"><input type=\"checkbox\" id=\"daily-on\" " + (rules.dailyTime ? "checked" : "") + ">แจ้งเตือนสรุป</label><div class=\"fields-2\">" + inputField("quiet-start", "เงียบตั้งแต่", "time", rules.quietStart) + inputField("quiet-end", "จนถึง", "time", rules.quietEnd) + "</div><p class=\"caption\">ช่วงเงียบใช้กับการเตือนงานและกิจวัตร</p>" + footer("save-settings", "บันทึกการตั้งค่า"));
+    sheet("settings", "การแจ้งเตือน", "<div class=\"setting-group\"><h3>การแจ้งเตือนของเครื่อง</h3><p class=\"small\">" + (n ? "เปิดรับการแจ้งเตือนแล้ว" : "อนุญาตให้ Lock In เตือนงาน กิจวัตร และสรุปบันทึก") + "</p>" + (n ? "" : btn("notifications", "อนุญาตการแจ้งเตือน", "secondary")) + "</div>" + inputField("daily-time", "เวลาแจ้งสรุปวัน และสรุปเดือนเมื่อขึ้นเดือนใหม่", "time", rules.dailyTime) + "<label class=\"line-toggle\"><input type=\"checkbox\" id=\"daily-on\" " + (rules.dailyTime ? "checked" : "") + ">แจ้งเตือนสรุป</label><div class=\"fields-2\">" + inputField("quiet-start", "เงียบตั้งแต่", "time", rules.quietStart) + inputField("quiet-end", "จนถึง", "time", rules.quietEnd) + "</div><p class=\"caption\">ช่วงเงียบใช้กับการเตือนงานและกิจวัตร</p>" + footer("save-settings", "บันทึกการตั้งค่า"));
   }
   function render() {
     read();
@@ -954,6 +981,7 @@
     if (el("focus-clock"))
       el("focus-clock").textContent = asClock(sec);
     if (sec === 0 && prevSec !== 0) {
+      if (bridge) read();
       render();
       if (modal === "focus")
         showFocus();

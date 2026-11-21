@@ -1,9 +1,7 @@
 package th.studypace.app;
 
 import android.content.Context;
-import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.RippleDrawable;
@@ -11,6 +9,8 @@ import android.content.res.ColorStateList;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageView;
+import android.content.pm.PackageManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -20,18 +20,18 @@ import java.util.Locale;
 
 /** Interruption page above the selected app. The system navigation stays accessible. */
 final class GuardPage extends FrameLayout {
-    private static final int FOREST = 0xff183c35;
-    private static final int PAPER = 0xfff8f5ea;
-    private static final int PEACH = 0xfff7b782;
-    private static final int MUTED = 0xffb5cdc0;
+    private static final int MIDNIGHT = 0xff101c3a;
+    private static final int PAPER = 0xfff9faff;
+    private static final int BLUE = 0xffb9ceff;
+    private static final int MUTED = 0xffc0cce2;
     private final TextView remaining;
     private final boolean activeFocus;
 
-    GuardPage(Context context, String appName, String task, boolean inFocus, int minutes,
+    GuardPage(Context context, String pkg, String appName, String task, boolean inFocus, int minutes,
               Runnable backToTask, Runnable allow, Runnable goHome) {
         super(context);
         activeFocus = inFocus;
-        setBackgroundColor(FOREST);
+        setBackgroundColor(MIDNIGHT);
         setClickable(true);
         ScrollView scroll = new ScrollView(context);
         scroll.setFillViewport(true);
@@ -43,41 +43,44 @@ final class GuardPage extends FrameLayout {
         column.setPadding(dp(26), dp(30), dp(26), dp(20));
         scroll.addView(column, new ScrollView.LayoutParams(-1, -2));
 
-        TextView brand = label("พอดี", 21, PAPER, true);
+        TextView brand = label("Lock In", 25, PAPER, true);
         brand.setGravity(Gravity.START);
         column.addView(brand, new LinearLayout.LayoutParams(-1, -2));
         spacer(column, 20, 1);
 
-        View sun = new View(context) {
-            private final Paint pen = new Paint(Paint.ANTI_ALIAS_FLAG);
-            @Override protected void onDraw(Canvas canvas) {
-                super.onDraw(canvas);
-                float cx = getWidth() / 2f, horizon = getHeight() * 0.67f, r = dp(30);
-                pen.setColor(PEACH);
-                canvas.save();
-                canvas.clipRect(0, 0, getWidth(), horizon);
-                canvas.drawCircle(cx, horizon, r, pen);
-                canvas.restore();
-                pen.setColor(MUTED);
-                pen.setStrokeWidth(dp(1.2f));
-                canvas.drawLine(cx - dp(55), horizon + dp(5), cx + dp(55), horizon + dp(5), pen);
-                canvas.drawLine(cx - dp(34), horizon + dp(12), cx + dp(34), horizon + dp(12), pen);
-            }
-        };
-        sun.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        column.addView(sun, new LinearLayout.LayoutParams(-1, dp(80)));
-        spacer(column, 12, 0);
-        TextView contextLabel = label(inFocus ? "กำลังโฟกัส" : "ก่อนเปิด " + appName, 15, MUTED, false);
-        column.addView(contextLabel);
-        TextView heading = label(inFocus ? (task.isEmpty() ? "กลับไปโฟกัสต่อ" : task)
-                        : (task.isEmpty() ? "อยากพักไถสักครู่ไหม" : task),
-                30, PAPER, true);
-        heading.setMaxLines(4);
-        heading.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        heading.setPadding(0, dp(8), 0, dp(4));
+        ImageView art = new ImageView(context);
+        art.setImageResource(R.drawable.lockin_art);
+        art.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        GradientDrawable mask = new GradientDrawable();
+        mask.setCornerRadius(dp(24));
+        mask.setColor(PAPER);
+        art.setBackground(mask);
+        art.setClipToOutline(true);
+        column.addView(art, new LinearLayout.LayoutParams(dp(106), dp(106)));
+        spacer(column, 16, 0);
+        LinearLayout appLine = new LinearLayout(context);
+        appLine.setGravity(Gravity.CENTER);
+        ImageView appIcon = new ImageView(context);
+        try {
+            appIcon.setImageDrawable(context.getPackageManager().getApplicationIcon(pkg));
+            appLine.addView(appIcon, new LinearLayout.LayoutParams(dp(24), dp(24)));
+        } catch (PackageManager.NameNotFoundException ignored) {}
+        TextView contextLabel = label("พักก่อนเข้า " + appName, 15, MUTED, false);
+        contextLabel.setPadding(dp(8), 0, 0, 0);
+        appLine.addView(contextLabel);
+        column.addView(appLine);
+        String[] prompts = {"อีกห้านาที คุณอยากทำอะไรเสร็จ?", "พักนิ้ว แล้วกลับไปทำสิ่งที่ตั้งใจ", "ให้เวลาอีกนิดกับสิ่งที่สำคัญ"};
+        int prompt = (int) ((System.currentTimeMillis() / 60000L) % prompts.length);
+        TextView heading = label(inFocus ? "กลับไปต่อจากที่ค้างไว้ไหม?" : prompts[prompt], 26, PAPER, true);
+        heading.setPadding(0, dp(12), 0, dp(6));
         column.addView(heading, new LinearLayout.LayoutParams(-1, -2));
-        remaining = label(inFocus ? "" : (task.isEmpty() ? "ตั้งเวลาพักร่วมกันสำหรับแอปที่เลือก"
-                : "งานที่คุณตั้งใจทำวันนี้"), 16, MUTED, false);
+        if (!task.isEmpty()) {
+            TextView goal = label("สิ่งที่ตั้งใจไว้ · " + task, 16, PAPER, false);
+            goal.setMaxLines(3);
+            goal.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            column.addView(goal);
+        }
+        remaining = label(inFocus ? "" : "เริ่มเพียงห้านาที แล้วค่อยเลือกว่าจะทำต่อไหม", 15, MUTED, false);
         column.addView(remaining);
         spacer(column, 28, 1);
 
@@ -89,7 +92,7 @@ final class GuardPage extends FrameLayout {
         spacer(column, 6, 0);
         Button home = button("กลับหน้าหลักโทรศัพท์", goHome);
         home.setTextColor(MUTED);
-        home.setBackground(new RippleDrawable(ColorStateList.valueOf(0x227ba697), null, null));
+        home.setBackground(new RippleDrawable(ColorStateList.valueOf(0x225975a0), null, null));
         column.addView(home, new LinearLayout.LayoutParams(-1, -2));
     }
 
@@ -130,11 +133,11 @@ final class GuardPage extends FrameLayout {
     private void addButton(LinearLayout column, String title, boolean primary, Runnable action) {
         Button button = button(title, action);
         GradientDrawable shape = new GradientDrawable();
-        shape.setColor(primary ? PEACH : Color.TRANSPARENT);
+        shape.setColor(primary ? BLUE : Color.TRANSPARENT);
         shape.setCornerRadius(dp(16));
-        if (!primary) shape.setStroke(dp(1), 0xff709084);
-        button.setTextColor(primary ? FOREST : PAPER);
-        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x44709084), shape, null));
+        if (!primary) shape.setStroke(dp(1), 0xff62749d);
+        button.setTextColor(primary ? MIDNIGHT : PAPER);
+        button.setBackground(new RippleDrawable(ColorStateList.valueOf(0x445975a0), shape, null));
         column.addView(button, new LinearLayout.LayoutParams(-1, -2));
     }
 

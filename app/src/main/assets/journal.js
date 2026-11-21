@@ -95,7 +95,7 @@
       var itemDate=new Date(d.getFullYear(),d.getMonth(),i,12), key=dateKey(itemDate), day=s.days[key];
       html+='<button type="button" data-jday="'+key+'" class="jr-day l'+level(day)+(key===today?' today':'')+'" '+(key>today?'disabled ':'')+'aria-label="'+dayName(itemDate)+(day?' · จับเวลาโฟกัส '+clock(day.focus):' · ไม่มีบันทึก')+'">'+i+'</button>';
     }
-    return html+'</div><div class="jr-legend">เวลาโฟกัสต่อวัน · น้อย <i style="background:#f0f0e8"></i><i style="background:#dfe9d6"></i><i style="background:#abc8a9"></i><i style="background:#568367"></i><i style="background:#285840"></i> มาก</div>';
+    return html+'</div><div class="jr-legend">เวลาโฟกัสต่อวัน · น้อย <i style="background:#f0f3f9"></i><i style="background:#d7e2ff"></i><i style="background:#96b0ff"></i><i style="background:#4b65be"></i><i style="background:#1935a9"></i> มาก</div>';
   }
   function row(label,detail,value,glyph,orange) {
     return '<li class="jr-row"><span class="jr-glyph'+(orange?' orange':'')+'">'+icon(glyph,16)+'</span><span class="jr-row-text">'+esc(label)+(detail?'<small>'+esc(detail)+'</small>':'')+'</span>'+(value?'<span class="jr-quantity">'+esc(value)+'</span>':'')+'</li>';
@@ -194,7 +194,7 @@
     return chars.slice(0,lo).join('').replace(/[\u0e31\u0e34-\u0e3a\u0e47-\u0e4e]+$/,'')+'…';
   }
   function paintSummary(s,monthly,date,showTasks,showApps) {
-    var paper='#faf8f1', ink='#1e4938', muted='#526c5b', soft='#dce7d5';
+    var paper='#f4f6fb', ink='#101c3a', muted='#50617b', soft='#d7e2ff';
     var w=900, padX=54, events=s.tasks, blocks=[];
     function block(name, rows, count) {
       if(!rows.length) return;
@@ -226,24 +226,20 @@
     function line(x1,y1,x2,y2,color,lw) {
       ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.strokeStyle=color; ctx.lineWidth=lw||1; ctx.stroke();
     }
-    function circle(x,y,r,color,fill) {
-      ctx.beginPath(); ctx.arc(x,y,r,0,2*Math.PI);
-      if(fill){ctx.fillStyle=color;ctx.fill();}else{ctx.strokeStyle=color;ctx.lineWidth=2;ctx.stroke();}
-    }
     ctx.fillStyle=paper;ctx.fillRect(0,0,w,h);
     ctx.fillStyle=ink;ctx.fillRect(0,0,w,base-24);
-    ctx.save();ctx.beginPath();ctx.rect(w-250,0,250,180);ctx.clip();
-    [46,67,88,109].forEach(function(r){circle(w-63,20,r,'#75987b',false);});
-    circle(w-63,20,23,'#f5b47e',true);ctx.restore();
-    label('พอดี',padX,72,34,'#fff4db','700');
-    label(monthly?'บันทึกรายเดือน':'บันทึกประจำวัน',padX,146,30,'#cee0c9');
-    label(monthly?monthName(date):dayName(date),padX,218,58,'#fff7e6','700',770);
-    line(padX,257,w-padX,257,'#587d63',1.5);
+    ctx.save();ctx.beginPath();ctx.rect(w-185,0,185,133);ctx.clip();
+    [0,35,70].forEach(function(offset){line(w-150+offset,130,w-50+offset,-12,'#4461b8',10);});
+    ctx.restore();
+    label('Lock In',padX,72,34,'#ffffff','700');
+    label(monthly?'บันทึกรายเดือน':'บันทึกประจำวัน',padX,146,30,'#cddcff');
+    label(monthly?monthName(date):dayName(date),padX,218,58,'#ffffff','700',770);
+    line(padX,257,w-padX,257,'#4b65be',1.5);
     var metrics=[[fmt(s.tasks.length),'งานที่เสร็จ'],[minNum(s.focus),'นาทีโฟกัส'],monthly?[fmt(Object.keys(s.days).length),'วันที่มีบันทึก']:[fmt(s.habits.length),'กิจวัตรที่ทำ']];
     metrics.forEach(function(item,i){
       var x=padX+i*268;
-      label(item[0],x,333,56,'#fff6de','700',245);
-      label(item[1],x,379,25,'#dbebd5','500',245);
+      label(item[0],x,333,56,'#ffffff','700',245);
+      label(item[1],x,379,25,'#cddcff','500',245);
     });
     var y=base;
     if(monthly){
@@ -251,12 +247,12 @@
       label('นาทีโฟกัสต่อวัน',w-padX,y+39,23,muted,'500',230,'right');
       var gap=7, cell=(w-2*padX-6*gap)/7, today=dateKey(new Date());
       weekdays.forEach(function(v,i){label(v,padX+i*(cell+gap)+cell/2,y+85,23,muted,'500',null,'center');});
-      var bg=['#edece3','#dfe9d6','#abc8a9','#568367','#285840'];
+      var bg=['#f0f3f9','#d7e2ff','#96b0ff','#4b65be','#1935a9'];
       for(var i=1;i<=nd;i++){
         var k=first+i-1, x=padX+(k%7)*(cell+gap), by=y+101+Math.floor(k/7)*65;
         var dk=dateKey(new Date(date.getFullYear(),date.getMonth(),i,12)), lv=level(s.days[dk]);
         if(dk<=today){ctx.fillStyle=bg[lv];ctx.fillRect(x,by,cell,55);}
-        label(i,x+cell/2,by+37,26,dk>today?'#a0aa9d':lv>=3?'#fff':ink,'600',null,'center');
+        label(i,x+cell/2,by+37,26,dk>today?'#71819b':lv>=3?'#fff':ink,'600',null,'center');
       }
       y+=calH;
     }
@@ -274,8 +270,8 @@
       y+=15;
     });
     if(!s.activities){label('ยังไม่มีบันทึกในช่วงนี้',padX,y+45,28,muted);y+=77;}
-    line(padX,h-72,w-padX,h-72,'#c9d6c4');
-    label('พอดี  /  บันทึกของฉัน',padX,h-30,23,muted,'600');
+    line(padX,h-72,w-padX,h-72,'#cbd6e9');
+    label('Lock In  /  บันทึกของฉัน',padX,h-30,23,muted,'600');
     label(monthly?monthKey(date):dateKey(date),w-padX,h-30,23,muted,'500',null,'right');
     return canvas;
   }
@@ -315,7 +311,7 @@
         try {
           var canvas=paintSummary(s,monthly,date,names,apps);
           var key=monthly?monthKey(date):dateKey(date);
-          var filename='Pordee-'+(monthly?'month-':'day-')+key+'.png';
+          var filename='LockIn-'+(monthly?'month-':'day-')+key+'.png';
           var png=canvas.toDataURL('image/png');
           if(!png.startsWith('data:image/png;base64,')) throw Error('สร้างภาพไม่สำเร็จ');
           if(window.Native && typeof window.Native.saveImage==='function'){

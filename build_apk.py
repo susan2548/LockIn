@@ -1,4 +1,4 @@
-"""Build and locally sign Pordee with the Android SDK and JDK, offline."""
+"""Build and locally sign LockIn with the Android SDK and JDK, offline."""
 
 import argparse
 import os
@@ -120,7 +120,7 @@ def build(out, api, tools_version):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=ROOT / "outputs/Pordee.apk")
+    parser.add_argument("--out", type=Path, default=ROOT / "outputs/LockIn.apk")
     parser.add_argument("--api", default="35")
     parser.add_argument("--build-tools", default="35.0.0")
     args = parser.parse_args()

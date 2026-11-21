@@ -27,6 +27,9 @@ import java.util.*;
 
 public class MainActivity extends Activity {
     private WebView web;
+    private final android.util.LruCache<String,byte[]> iconCache = new android.util.LruCache<String,byte[]>(2 * 1024 * 1024) {
+        @Override protected int sizeOf(String key, byte[] data) { return data.length; }
+    };
     private boolean ready;
     private String pendingRoute="";
     private static final String HOST="pordee.local";
@@ -36,7 +39,7 @@ public class MainActivity extends Activity {
         if(saved!=null) pendingRoute=saved.getString("pendingRoute","");
         else readRoute(getIntent());
         web=new WebView(this);
-        web.setBackgroundColor(Color.rgb(248,246,239));
+        web.setBackgroundColor(Color.rgb(244,246,251));
         WebSettings ws=web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setAllowFileAccess(false);
@@ -51,9 +54,13 @@ public class MainActivity extends Activity {
                 Uri uri=request.getUrl();
                 if("https".equals(uri.getScheme()) && HOST.equals(uri.getHost())) {
                     String path=uri.getPath();
+                    if(path!=null && path.matches("/icons/[a-zA-Z0-9_]+(?:[.][a-zA-Z0-9_]+)*[.]png")) {
+                        byte[] png = appIcon(path.substring(7, path.length() - 4));
+                        if(png != null) return new WebResourceResponse("image/png", null, new ByteArrayInputStream(png));
+                    }
                     if(path!=null && path.matches("/[a-zA-Z0-9_.-]+") && !path.contains("..")) {
                         String name=path.substring(1);
-                        String mime=name.endsWith(".html")?"text/html":name.endsWith(".css")?"text/css":name.endsWith(".js")?"text/javascript":name.endsWith(".svg")?"image/svg+xml":name.endsWith(".woff2")?"font/woff2":"application/octet-stream";
+                        String mime=name.endsWith(".html")?"text/html":name.endsWith(".css")?"text/css":name.endsWith(".js")?"text/javascript":name.endsWith(".webp")?"image/webp":name.endsWith(".svg")?"image/svg+xml":name.endsWith(".woff2")?"font/woff2":"application/octet-stream";
                         try{return new WebResourceResponse(mime,"UTF-8",getAssets().open(name));}catch(IOException ignored){}
                     }
                 }
@@ -65,6 +72,25 @@ public class MainActivity extends Activity {
         setContentView(web);
         web.loadUrl("https://"+HOST+"/index.html");
         Alerts.reschedule(this);
+    }
+    private byte[] appIcon(String pkg) {
+        byte[] cached = iconCache.get(pkg);
+        if (cached != null) return cached;
+        try {
+            android.graphics.drawable.Drawable icon = getPackageManager().getApplicationIcon(pkg).mutate();
+            int size = Math.min(144, Math.max(64, Math.round(44 * getResources().getDisplayMetrics().density)));
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888);
+            icon.setBounds(0, 0, size, size);
+            icon.draw(new android.graphics.Canvas(bitmap));
+            ByteArrayOutputStream stream = new ByteArrayOutputStream();
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream);
+            bitmap.recycle();
+            byte[] data = stream.toByteArray();
+            iconCache.put(pkg, data);
+            return data;
+        } catch (PackageManager.NameNotFoundException | RuntimeException missing) {
+            return null;
+        }
     }
     private synchronized void readRoute(Intent it) {
         if(it!=null && it.hasExtra("route") && AppRoutes.isInternal(this,it)) {
@@ -167,10 +193,10 @@ public class MainActivity extends Activity {
                 ContentValues values=new ContentValues();
                 values.put(MediaStore.Images.Media.DISPLAY_NAME,name);values.put(MediaStore.Images.Media.MIME_TYPE,"image/png");
                 if(Build.VERSION.SDK_INT>=29) {
-                    values.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/Pordee");
+                    values.put(MediaStore.Images.Media.RELATIVE_PATH,Environment.DIRECTORY_PICTURES+"/LockIn");
                     values.put(MediaStore.Images.Media.IS_PENDING,1);
                 } else {
-                    File dir=new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),"Pordee");
+                    File dir=new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),"LockIn");
                     if(!dir.isDirectory() && !dir.mkdirs())throw new IOException("folder");
                     File file=new File(dir,name);
                     if(file.exists())file=new File(dir,System.currentTimeMillis()+"-"+name);

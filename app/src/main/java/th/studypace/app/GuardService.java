@@ -8,13 +8,12 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ResolveInfo;
-import android.graphics.PixelFormat;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
 import android.provider.Settings;
-import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 
 import org.json.JSONArray;
@@ -37,7 +36,10 @@ public final class GuardService extends AccessibilityService {
     private final Calendar splitCalendar = Calendar.getInstance();
     private final SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
     private SharedPreferences meter;
-    private WindowManager windows;
+    private GateActivity gate;
+    private String gatePackage = "";
+    private long requestedAt;
+    private boolean scheduled;
     private JSONObject apps = new JSONObject();
     private JSONArray tasks = new JSONArray();
     private JSONObject focus;
@@ -62,6 +64,8 @@ public final class GuardService extends AccessibilityService {
         if (service != null) service.main.post(service::reload);
     }
 
+    static GuardService active() { return running.get(); }
+
     public static boolean isRunning() { return running.get() != null; }
 
     private final BroadcastReceiver screen = new BroadcastReceiver() {
@@ -71,12 +75,13 @@ public final class GuardService extends AccessibilityService {
                 flushUsage();
                 saveMeter();
                 screenAvailable = false;
-                hide();
+                current = "";
+                closeGate();
             } else {
                 screenAvailable = canDisplay();
                 // An unlock can restore the same Activity without another window event.
                 lastElapsed = SystemClock.elapsedRealtime();
-                evaluate();
+                reconcile(null);
             }
             schedule();
         }
@@ -85,7 +90,6 @@ public final class GuardService extends AccessibilityService {
     @Override protected void onServiceConnected() {
         super.onServiceConnected();
         if (ready) { reload(); return; }
-        windows = (WindowManager) getSystemService(WINDOW_SERVICE);
         meter = getSharedPreferences("guard_meter_v1", MODE_PRIVATE);
         groupRemaining = Math.max(0, meter.getLong("groupRemaining", 0L));
         exceptionEnd = meter.getLong("exceptionEnd", 0L);
@@ -153,40 +157,49 @@ public final class GuardService extends AccessibilityService {
     }
 
     @Override public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!ready || event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-                event.getPackageName() == null) return;
-        String next = event.getPackageName().toString();
-        if (next.equals(keyboard)) return;
-        String className = event.getClassName() == null ? "" : event.getClassName().toString();
-        // Adding or dismissing our own panel may dispatch events after removeView returns.
-        // Only the host activity constitutes actually leaving the app being timed.
-        if (!current.equals(next) && next.equals(getPackageName()) && !className.endsWith("MainActivity")) return;
-        if (!canDisplay()) {
-            if (screenAvailable) {
-                account();
-                flushUsage();
-                saveMeter();
-            }
-            screenAvailable = false;
-            hide();
-            schedule();
-            return;
-        }
-        account();
-        screenAvailable = true;
-        if (!current.equals(next)) {
-            flushUsage();
-            saveMeter();
-            hide();
-            current = next;
-        }
-        evaluate();
+        if (!ready || event == null || apps.length() == 0) return;
+        String reported = null;
+        if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.getPackageName() != null)
+            reported = event.getPackageName().toString();
+        reconcile(reported);
         schedule();
     }
 
+    // Read only the package on the active root. Never traverse children, text or events' contents.
+    private void reconcile(String reported) {
+        account();
+        screenAvailable = canDisplay();
+        if (!screenAvailable) {
+            flushUsage();
+            current = "";
+            closeGate();
+            return;
+        }
+        String foreground = null;
+        AccessibilityNodeInfo root = null;
+        try {
+            root = getRootInActiveWindow();
+            if (root != null && root.getPackageName() != null) foreground = root.getPackageName().toString();
+        } catch (RuntimeException ignored) {
+        } finally {
+            if (root != null) root.recycle();
+        }
+        if (foreground == null || foreground.equals(keyboard)) foreground = reported;
+        if (foreground != null && !foreground.equals(keyboard) && !foreground.equals(current)) {
+            flushUsage();
+            saveMeter();
+            current = foreground;
+        }
+        evaluate();
+    }
+
     private JSONObject app() {
-        if (current.isEmpty() || protectedPackages.contains(current)) return null;
-        JSONObject rule = apps.optJSONObject(current);
+        return ruleFor(current);
+    }
+
+    private JSONObject ruleFor(String pkg) {
+        if (pkg.isEmpty() || protectedPackages.contains(pkg)) return null;
+        JSONObject rule = apps.optJSONObject(pkg);
         if (rule == null) return null;
         String mode = rule.optString("mode");
         return ("always".equals(mode) || "focus".equals(mode)) ? rule : null;
@@ -196,8 +209,8 @@ public final class GuardService extends AccessibilityService {
         return focus != null && focus.optLong("end") > wall;
     }
 
-    private boolean exception(long wall) {
-        return focusing(wall) && exceptionEnd > wall && current.equals(exceptionPackage)
+    private boolean exception(String pkg, long wall) {
+        return focusing(wall) && exceptionEnd > wall && pkg.equals(exceptionPackage)
                 && exceptionFocusStart == focus.optLong("start");
     }
 
@@ -207,11 +220,11 @@ public final class GuardService extends AccessibilityService {
         long span = Math.max(0L, elapsed - lastElapsed);
         lastElapsed = elapsed;
         JSONObject rule = app();
-        if (span == 0 || !screenAvailable || page != null || rule == null) return;
+        if (span == 0 || !screenAvailable || current.equals(gatePackage) || rule == null) return;
         long wall = System.currentTimeMillis();
         if (pendingMs == 0) pendingSinceWall = wall - span;
         pendingMs += span;
-        if ("always".equals(rule.optString("mode")) && groupRemaining > 0 && !exception(wall - span)) {
+        if ("always".equals(rule.optString("mode")) && groupRemaining > 0 && !exception(current, wall - span)) {
             groupRemaining = Math.max(0, groupRemaining - span);
         }
     }
@@ -248,16 +261,21 @@ public final class GuardService extends AccessibilityService {
 
     private void refreshTimer() {
         if (!ready) return;
-        account();
+        scheduled = false;
+        reconcile(null);
         if (pendingMs >= 60000) flushUsage();
-        if (SystemClock.elapsedRealtime() - lastCheckpoint >= 5000 && page == null) saveMeter();
-        evaluate();
+        if (pendingMs > 0 && SystemClock.elapsedRealtime() - lastCheckpoint >= 5000) saveMeter();
         schedule();
     }
 
     private void schedule() {
-        main.removeCallbacks(tick);
-        if (ready && screenAvailable && app() != null) main.postDelayed(tick, 1000L);
+        if (!ready || !screenAvailable || apps.length() == 0) {
+            main.removeCallbacks(tick);
+            scheduled = false;
+        } else if (!scheduled) {
+            scheduled = true;
+            main.postDelayed(tick, 800L);
+        }
     }
 
     private JSONObject nextTask() {
@@ -273,48 +291,82 @@ public final class GuardService extends AccessibilityService {
         return candidate;
     }
 
+    private boolean blocked(String pkg, long now) {
+        JSONObject rule = ruleFor(pkg);
+        return rule != null && !exception(pkg, now) &&
+                (focusing(now) || ("always".equals(rule.optString("mode")) && groupRemaining <= 0));
+    }
+
     private void evaluate() {
-        JSONObject rule = app();
         long now = System.currentTimeMillis();
-        boolean activeFocus = focusing(now);
-        if (!screenAvailable || rule == null || exception(now) ||
-                (!activeFocus && (!"always".equals(rule.optString("mode")) || groupRemaining > 0))) {
-            hide();
-            return;
+        if (!screenAvailable || (!gatePackage.isEmpty() && !blocked(gatePackage, now))) closeGate();
+        if (gate == null && requestedAt != 0 && !current.equals(getPackageName()) && !current.equals(gatePackage)
+                && SystemClock.elapsedRealtime() - requestedAt >= 1600L) closeGate();
+        if (gate != null && !gate.isFinishing()) {
+            renderGate();
+            if (current.equals(getPackageName()) || gate.hasWindowFocus()) return;
         }
-        JSONObject task = activeFocus ? focus : nextTask();
-        String title = task == null ? "" : task.optString("title");
-        String id = task == null ? "" : task.optString(activeFocus ? "taskId" : "id");
-        long end = activeFocus ? focus.optLong("end") : 0;
-        String key = current + "|" + id + "|" + title + "|" + end + "|" + breakMinutes;
-        if (page != null && pageKey.equals(key)) {
-            page.updateTime(end - now);
+        if (!screenAvailable || !blocked(current, now)) return;
+        if (current.equals(gatePackage) && requestedAt != 0) {
+            // Some vendor builds can suppress a background activity launch. Never leave the feed open.
+            if (gate == null && SystemClock.elapsedRealtime() - requestedAt >= 1600L) goHome();
             return;
         }
         flushUsage();
         saveMeter();
-        hide();
-        GuardPage newPage = new GuardPage(this, rule.optString("name", current), title, activeFocus,
-                breakMinutes, () -> returnToTask(activeFocus, id, title), () -> permit(activeFocus), this::goHome);
-        newPage.updateTime(end - now);
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.OPAQUE);
-        params.setTitle("พอดี");
-        try {
-            windows.addView(newPage, params);
-            page = newPage;
-            pageKey = key;
-        } catch (RuntimeException ignored) {
-            // Service can be disabled while a window event is queued.
+        gatePackage = current;
+        requestedAt = SystemClock.elapsedRealtime();
+        Intent show = new Intent(this, GateActivity.class).putExtra("package", current)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        try { startActivity(show); } catch (RuntimeException unavailable) { goHome(); }
+    }
+
+    boolean attachGate(GateActivity activity, String pkg) {
+        if (pkg == null || !pkg.equals(gatePackage) || !blocked(pkg, System.currentTimeMillis()) || !canDisplay()) return false;
+        if (gate != activity) pageKey = "";
+        gate = activity;
+        renderGate();
+        return true;
+    }
+
+    void detachGate(GateActivity activity) {
+        if (gate != activity) return;
+        gate = null;
+        page = null;
+        pageKey = "";
+        if (gatePackage.equals(activity.getIntent().getStringExtra("package"))) {
+            gatePackage = "";
+            requestedAt = 0;
         }
+        if (current.equals(getPackageName())) current = "";
+        schedule();
+    }
+
+    private void renderGate() {
+        long now = System.currentTimeMillis();
+        boolean activeFocus = focusing(now);
+        JSONObject rule = ruleFor(gatePackage);
+        if (rule == null || gate == null) return;
+        JSONObject task = activeFocus ? focus : nextTask();
+        String title = task == null ? "" : task.optString("title");
+        String id = task == null ? "" : task.optString(activeFocus ? "taskId" : "id");
+        long end = activeFocus ? focus.optLong("end") : 0;
+        String key = gatePackage + "|" + id + "|" + title + "|" + end + "|" + breakMinutes;
+        if (page != null && pageKey.equals(key)) {
+            page.updateTime(end - now);
+            return;
+        }
+        String pkg = gatePackage;
+        page = new GuardPage(gate, pkg, rule.optString("name", pkg), title, activeFocus,
+                breakMinutes, () -> returnToTask(activeFocus, id, title), () -> permit(activeFocus), this::goHome);
+        page.updateTime(end - now);
+        gate.setContentView(page);
+        pageKey = key;
     }
 
     private void decision(String type, String note) {
-        JSONObject rule = app();
-        if (rule == null) return;
-        Store.event(this, type, "", rule.optString("name", current), 1, note, current, "", System.currentTimeMillis());
+        JSONObject rule = ruleFor(gatePackage);
+        if (rule != null) Store.event(this, type, "", rule.optString("name", gatePackage), 1, note, gatePackage, "", System.currentTimeMillis());
     }
 
     private void returnToTask(boolean activeFocus, String id, String title) {
@@ -322,17 +374,17 @@ public final class GuardService extends AccessibilityService {
         if (!activeFocus) {
             Store.startFocus(this, id, title.isEmpty() ? "โฟกัส 5 นาที" : title, 5);
         }
-        leaveWindow();
         Intent intent = AppRoutes.open(this, "focus");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         try { startActivity(intent); }
         catch (RuntimeException ex) { performGlobalAction(GLOBAL_ACTION_HOME); }
+        leaveWindow();
     }
 
     private void permit(boolean wasFocusing) {
         long wall = System.currentTimeMillis();
         if (wasFocusing && focusing(wall)) {
-            exceptionPackage = current;
+            exceptionPackage = gatePackage;
             exceptionFocusStart = focus.optLong("start");
             exceptionEnd = Math.min(focus.optLong("end"), wall + 5 * 60000L);
             decision("open", "เปิดเฉพาะแอปนี้ชั่วคราว");
@@ -341,31 +393,34 @@ public final class GuardService extends AccessibilityService {
             decision("open", "เริ่มเวลาพักร่วม");
         }
         saveMeter();
-        hide();
-        lastElapsed = SystemClock.elapsedRealtime();
-        evaluate();
-        schedule();
+        Intent open = getPackageManager().getLaunchIntentForPackage(gatePackage);
+        if (open != null) {
+            open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            try { startActivity(open); } catch (RuntimeException ignored) {}
+        }
+        leaveWindow();
     }
 
     private void leaveWindow() {
-        hide();
+        closeGate();
         current = "";
         lastElapsed = SystemClock.elapsedRealtime();
         schedule();
     }
 
-    private void goHome() {
-        leaveWindow();
+    void goHome() {
         performGlobalAction(GLOBAL_ACTION_HOME);
+        leaveWindow();
     }
 
-    private void hide() {
-        if (page != null) {
-            GuardPage oldPage = page;
-            page = null;
-            pageKey = "";
-            try { windows.removeViewImmediate(oldPage); } catch (RuntimeException ignored) {}
-        }
+    private void closeGate() {
+        GateActivity previous = gate;
+        gate = null;
+        page = null;
+        pageKey = "";
+        gatePackage = "";
+        requestedAt = 0;
+        if (previous != null && !previous.isFinishing()) previous.finishAndRemoveTask();
     }
 
     @Override public void onInterrupt() {}
@@ -379,7 +434,7 @@ public final class GuardService extends AccessibilityService {
             main.removeCallbacks(tick);
             running = new WeakReference<>(null);
             try { unregisterReceiver(screen); } catch (RuntimeException ignored) {}
-            hide();
+            closeGate();
         }
         super.onDestroy();
     }

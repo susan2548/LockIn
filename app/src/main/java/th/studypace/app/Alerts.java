@@ -236,7 +236,7 @@ public class Alerts extends BroadcastReceiver {
         PendingIntent open = openRoute(context, item);
         Notification.Builder notice = new Notification.Builder(context, channel)
             .setSmallIcon(icon).setContentTitle(item.title).setContentText(item.body)
-            .setColor(Color.rgb(26, 84, 66)).setContentIntent(open).setAutoCancel(true)
+            .setColor(Color.rgb(37, 77, 219)).setContentIntent(open).setAutoCancel(true)
             .setVisibility(Notification.VISIBILITY_PRIVATE).setOnlyAlertOnce(false);
         if ("task".equals(item.kind)) {
             notice.addAction(new Notification.Action.Builder(null, "เริ่มโฟกัส", open).build());
