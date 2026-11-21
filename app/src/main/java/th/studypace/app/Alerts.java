@@ -106,14 +106,14 @@ public class Alerts extends BroadcastReceiver {
             LocalTime time = parseTime(habit.optString("time"));
             if (time == null || id.isEmpty()) continue;
             String unit = habit.optString("unit", "ครั้ง");
-            double goal = Math.max(1, habit.optDouble("goal", 1));
+            double goal = habit.optDouble("goal", 1);
             // Include the start of a new week even when a weekly goal was already met.
             for (int add = -1; add <= 8; add++) {
                 LocalDate day = today.plusDays(add);
                 if (logged(habit, events, day, zone) >= goal) continue;
                 String key = "habit/" + id + "/" + day;
                 put(items, new Item(key, "habit", id, habit.optString("title", "กิจวัตร"),
-                    "บันทึกความคืบหน้าวันนี้ · +1 " + unit, "habit:" + id,
+                    "บันทึกปริมาณที่ทำได้ · " + unit, "habit-log:" + id,
                     epoch(day, time, zone), 2 * 60 * MINUTE));
             }
         }
@@ -241,8 +241,7 @@ public class Alerts extends BroadcastReceiver {
         if ("task".equals(item.kind)) {
             notice.addAction(new Notification.Action.Builder(null, "เริ่มโฟกัส", open).build());
         } else if ("habit".equals(item.kind)) {
-            notice.addAction(new Notification.Action.Builder(null, "บันทึก +1",
-                action(context, LOG_HABIT, item, snooze)).build());
+            notice.addAction(new Notification.Action.Builder(null, "ระบุปริมาณ", open).build());
         }
         if (item.routine()) notice.addAction(new Notification.Action.Builder(null, "เลื่อน 10 นาที",
             action(context, SNOOZE, item, snooze)).build());
@@ -286,7 +285,7 @@ public class Alerts extends BroadcastReceiver {
                 for (int i = 0; i < habits.length(); i++) {
                     JSONObject habit = habits.optJSONObject(i);
                     if (habit == null || !id.equals(habit.optString("id"))) continue;
-                    if (logged(habit, array(data, "events"), today, zone) < Math.max(1, habit.optDouble("goal", 1))) {
+                    if (logged(habit, array(data, "events"), today, zone) < habit.optDouble("goal", 1)) {
                         Store.event(context, "habit", id, habit.optString("title"), 1, "", "",
                             habit.optString("unit", "ครั้ง"), now, habit.optString("icon"));
                     }
@@ -333,13 +332,14 @@ public class Alerts extends BroadcastReceiver {
         long from = epoch(start, LocalTime.MIDNIGHT, zone);
         long until = epoch(start.plusDays(weekly ? 7 : 1), LocalTime.MIDNIGHT, zone);
         String id = habit.optString("id");
-        double count = 0;
+        java.math.BigDecimal count = java.math.BigDecimal.ZERO;
         for (int i = 0; i < events.length(); i++) {
             JSONObject e = events.optJSONObject(i);
             if (e == null || !"habit".equals(e.optString("type")) || !id.equals(e.optString("id"))) continue;
+            if (!e.optString("unit").isEmpty() && !e.optString("unit").equals(habit.optString("unit"))) continue;
             long at = e.optLong("at");
-            if (at >= from && at < until) count += e.optDouble("value", 1);
+            if (at >= from && at < until) count=count.add(java.math.BigDecimal.valueOf(e.optDouble("value", 1)));
         }
-        return count;
+        return count.round(java.math.MathContext.DECIMAL64).doubleValue();
     }
 }

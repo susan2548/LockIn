@@ -214,6 +214,7 @@
     overlay.hidden = true;
     overlay.innerHTML = "";
     document.body.classList.remove("modal-open");
+    amountForm=null;
     modal = "";
     detail = "";
     if (previousButton && document.contains(previousButton))
@@ -322,26 +323,102 @@
     if (x.period === "week")
       start.setDate(start.getDate() - (start.getDay() + 6) % 7);
     return state.events.filter(function (e) {
-      return e.type === "habit" && e.id === x.id && e.at >= start.getTime() && e.at <= now.getTime();
+      return e.type === "habit" && e.id === x.id && (!e.unit || e.unit===x.unit) && e.at >= start.getTime() && e.at <= now.getTime();
     }).reduce(function (s, e) {
       return s + (Number(e.value) || 0);
     }, 0);
   }
-  function addHabitCount(ref) {
+  var amountForm = null;
+  var quantityFamilies = [
+    [{label:"มล.",preferred:true,aliases:["มล","มิลลิลิตร","ml"],size:1,presets:[250,500,750]}, {label:"ลิตร",aliases:["ลิตร","ล","l","liter","litre"],size:1000,presets:[0.25,0.5,1]}],
+    [{label:"กม.",aliases:["กม","กิโลเมตร","km"],size:1000,presets:[0.5,1,2]}, {label:"เมตร",aliases:["เมตร","ม","m"],size:1,presets:[100,500,1000]}],
+    [{label:"นาที",preferred:true,aliases:["นาที","min"],size:1,presets:[5,15,30]}, {label:"ชั่วโมง",aliases:["ชั่วโมง","ชม","h","hr"],size:60,presets:[0.25,0.5,1]}],
+    [{label:"กรัม",aliases:["กรัม","ก","g"],size:1,presets:[100,250,500]}, {label:"กก.",aliases:["กก","กิโลกรัม","kg"],size:1000,presets:[0.25,0.5,1]}]
+  ];
+  function quantityUnits(unit) {
+    var key=unit.toLowerCase().replace(/[.\s]/g,"");
+    for (var family of quantityFamilies) {
+      var base=family.find(function(u){return u.aliases.includes(key);});
+      if (base) return {base:base,choices:family};
+    }
+    var single={label:unit,size:1,presets:[1,2,5]};
+    return {base:single,choices:[single]};
+  }
+  function quantityText(value) {
+    return value.toLocaleString("th-TH",{maximumFractionDigits:6});
+  }
+  function lastHabitEntry(x) {
+    for (var i=state.events.length-1;i>=0;i--) {
+      var e=state.events[i];
+      if(e.type==="habit" && e.id===x.id && (e.unit||x.unit)===x.unit && (e.day||key(new Date(e.at)))===today()){
+        return {event:e,index:i};
+      }
+    }
+    return null;
+  }
+  function showHabitAmount(ref,editing) {
     read();
-    var x = getHabit(ref);
-    if (!x)
-      return;
-    addEvent({
-      type: "habit",
-      id: x.id,
-      title: x.title,
-      unit: x.unit,
-      icon: x.icon || "",
-      value: 1
-    });
+    var x=getHabit(ref);
+    if(!x)return;
+    var units=quantityUnits(x.unit),latest=lastHabitEntry(x);
+    var previous=editing&&latest?latest:null;
+    var initial=units.choices.find(function(u){return u.preferred;})||units.base;
+    amountForm={ref:ref,unit:x.unit,units:units,display:initial,previous:previous};
+    var unitField=units.choices.length===1?'<span class="amount-unit">'+h(x.unit)+'</span>':
+      '<label class="field">หน่วย<select id="amount-unit">'+units.choices.map(function(u,i){
+        return '<option value="'+i+'"'+(u===initial?' selected':'')+'>'+h(u.label)+'</option>';
+      }).join('')+'</select></label>';
+    var amount=previous?Number((previous.event.value*units.base.size/initial.size).toPrecision(12)):"";
+    var correction=!previous&&latest?btn("edit-last-amount","แก้รายการล่าสุดของวันนี้ · "+quantityText(latest.event.value)+" "+x.unit,"subtle-button",ref):"";
+    sheet("habit-amount",previous?"แก้ปริมาณครั้งล่าสุด":"บันทึกปริมาณ",'<p class="time-context">'+h(x.title)+'</p><div class="amount-fields">'+
+      inputField("habit-amount","ปริมาณ"+(previous?"ที่ถูกต้อง":"ครั้งนี้"),"text",amount,'inputmode="decimal" autocomplete="off" placeholder="0"')+
+      unitField+'</div><div class="time-shortcuts" id="amount-presets"></div><p class="caption" id="amount-preview" aria-live="polite"></p>'+
+      footer("save-amount",previous?"บันทึกการแก้ไข":"บันทึก",null,ref)+correction,ref);
+    paintAmountPresets();
+    previewAmount();
+  }
+  function entryAmount() {
+    var raw=v("habit-amount").replace(/[๐-๙]/g,function(c){return c.charCodeAt(0)-3664;});
+    if(!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw))return NaN;
+    var f=amountForm, n=Number(raw)*f.display.size/f.units.base.size;
+    return isFinite(n)&&n>=0.000001&&n<=Number.MAX_SAFE_INTEGER?n:NaN;
+  }
+  function paintAmountPresets(){
+    var u=amountForm.display;
+    el("amount-presets").innerHTML=u.presets.map(function(n){
+      return btn("preset-amount",quantityText(n)+" "+u.label,"time-chip",String(n));
+    }).join("");
+  }
+  function previewAmount(){
+    var f=amountForm,x=getHabit(f.ref),n=entryAmount();
+    if(!x)return;
+    var total=habitCount(x);
+    if(isFinite(n))total+=n-(f.previous?f.previous.event.value:0);
+    el("amount-preview").textContent=(isFinite(n)?"หลังบันทึก ":"ยอดปัจจุบัน ")+quantityText(total)+
+      " / "+quantityText(x.goal)+" "+x.unit;
+    el("form-error").textContent="";
+  }
+  function saveHabitAmount(ref){
+    if(modal!=="habit-amount"||!amountForm||amountForm.ref!==ref)return;
+    var f=amountForm,n=entryAmount();
+    if(!isFinite(n))return invalid("ใส่ปริมาณที่มากกว่า 0 เช่น 0.5 หรือ 500","habit-amount");
+    read();
+    var x=getHabit(ref);
+    if(!x||x.unit!==f.unit){closeSheet();render();toast("กิจวัตรเปลี่ยนแล้ว กรุณาเปิดรายการอีกครั้ง");return;}
+    if(f.previous){
+      var old=f.previous.event,current=lastHabitEntry(x);
+      if(!current||current.event.at!==old.at||current.event.value!==old.value||
+        (bridge?current.event.seq!==old.seq:current.index!==f.previous.index))
+        return invalid("รายการล่าสุดเปลี่ยนแล้ว กรุณาปิดแล้วเปิดใหม่");
+      if(bridge){
+        if(!bridge.reviseHabit(old.seq,ref,old.value,n))return invalid("รายการเปลี่ยนแล้ว กรุณาปิดแล้วเปิดใหม่");
+      }else{current.event.value=n;saveLocal();}
+    }else{
+      addEvent({type:"habit",id:ref,title:x.title,unit:x.unit,icon:x.icon||"",value:n});
+    }
+    closeSheet();
     render();
-    toast(x.title + " +1 " + x.unit);
+    toast(x.title+(f.previous?" แก้เป็น ":" +")+quantityText(n)+" "+x.unit);
   }
   function taskSort(a, b) {
     return (a.date || "9999").localeCompare(b.date || "9999") || (a.time || "99").localeCompare(b.time || "99") || a.title.localeCompare(b.title);
@@ -366,7 +443,7 @@
   function habitRow(x) {
     var n = habitCount(x);
     var kind = LockInIcons.resolve(x.title, x.icon);
-    return "<div class=\"habit-row\"><span class=\"icon-soft " + (kind.key === "exercise" ? "peach" : "") + "\">" + LockInIcons.glyph(kind, 24) + "</span><button class=\"row-main\" data-act=\"edit-habit\" data-id=\"" + h(x.id) + "\"><strong>" + h(x.title) + "</strong><small>" + n + " / " + h(x.goal) + " " + h(x.unit) + (x.period === "week" ? " สัปดาห์นี้" : " วันนี้") + "</small><span class=\"mini-progress\"><i style=\"width:" + Math.min(100, 100 * n / Math.max(1, x.goal)) + "%\"></i></span></button><button data-act=\"habit-plus\" data-id=\"" + h(x.id) + "\" class=\"round-step\" aria-label=\"" + h(x.title + " เพิ่มหนึ่ง" + x.unit) + "\">" + icon("plus") + "</button></div>";
+    return "<div class=\"habit-row\"><span class=\"icon-soft " + (kind.key === "exercise" ? "peach" : "") + "\">" + LockInIcons.glyph(kind, 24) + "</span><button class=\"row-main\" data-act=\"edit-habit\" data-id=\"" + h(x.id) + "\"><strong>" + h(x.title) + "</strong><small>" + quantityText(n) + " / " + h(x.goal) + " " + h(x.unit) + (x.period === "week" ? " สัปดาห์นี้" : " วันนี้") + "</small><span class=\"mini-progress\"><i style=\"width:" + Math.min(100, 100 * n / x.goal) + "%\"></i></span></button><button data-act=\"habit-plus\" data-id=\"" + h(x.id) + "\" class=\"round-step\" aria-label=\"" + h("บันทึกปริมาณ " + x.title) + "\">" + icon("plus") + "</button></div>";
   }
   function streakPanel() {
     var totals = Object.create(null);
@@ -596,14 +673,14 @@
       unit: "ครั้ง",
       time: ""
     };
-    sheet("habit-editor", ref ? "แก้ไขกิจวัตร" : "เพิ่มกิจวัตร", inputField("habit-title", "ชื่อกิจวัตร", "text", x.title, "maxlength=\"100\" placeholder=\"เช่น เดินหลังเลิกเรียน\"") + habitIconField(x) + "<div class=\"fields-2\">" + inputField("habit-goal", "เป้าหมาย", "number", x.goal, "min=\"1\" max=\"999\" step=\"1\"") + inputField("habit-unit", "หน่วย", "text", x.unit, "maxlength=\"22\"") + "</div>" + habitPeriod(x.period === "week" ? "week" : "day") + inputField("habit-time", "เวลาเตือนในวันที่ยังไม่ครบเป้า (ถ้ามี)", "time", x.time) + footer("save-habit", "บันทึกกิจวัตร", ref ? "delete-habit" : null, ref), ref);
+    sheet("habit-editor", ref ? "แก้ไขกิจวัตร" : "เพิ่มกิจวัตร", inputField("habit-title", "ชื่อกิจวัตร", "text", x.title, "maxlength=\"100\" placeholder=\"เช่น เดินหลังเลิกเรียน\"") + habitIconField(x) + "<div class=\"fields-2\">" + inputField("habit-goal", "เป้าหมาย", "number", x.goal, "min=\"0.000001\" step=\"any\" inputmode=\"decimal\"") + inputField("habit-unit", "หน่วย", "text", x.unit, "maxlength=\"22\"") + "</div>" + habitPeriod(x.period === "week" ? "week" : "day") + inputField("habit-time", "เวลาเตือนในวันที่ยังไม่ครบเป้า (ถ้ามี)", "time", x.time) + footer("save-habit", "บันทึกกิจวัตร", ref ? "delete-habit" : null, ref), ref);
   }
   function saveHabit(ref) {
     var title = v("habit-title"), unit = v("habit-unit"), goal = Number(v("habit-goal"));
     if (!title)
       return invalid("ใส่ชื่อกิจวัตร", "habit-title");
-    if (!Number.isInteger(goal) || goal < 1 || goal > 999)
-      return invalid("ตั้งเป้าหมายระหว่าง 1 ถึง 999", "habit-goal");
+    if (!isFinite(goal) || goal < 0.000001 || goal > Number.MAX_SAFE_INTEGER)
+      return invalid("ใส่เป้าหมายที่มากกว่า 0 เช่น 2.5 หรือ 1500", "habit-goal");
     if (!unit)
       return invalid("ใส่หน่วย เช่น ครั้ง หรือ แก้ว", "habit-unit");
     read();
@@ -725,9 +802,37 @@
     put("rules", Object.assign({}, state.rules, { reminderPromptShown: true }));
     bridge.requestNotifications();
   }
+  function guardStatus(enabled) {
+    var description = enabled ? "ปิดหน้าคั่นก่อนเปิดแอปธนาคารหรือ TrueMoney ที่แจ้งเตือนเรื่องการช่วยเหลือพิเศษ ตัวจับเวลาและบันทึกยังใช้ได้" :
+      "คุณใช้ตัวจับเวลาและบันทึกได้ หากต้องการคั่นแอปที่เลือก ให้เปิดบริการ Lock In ในการตั้งค่าการช่วยเหลือพิเศษ";
+    return '<div class="status-box"><h3>' + (enabled ? "หน้าคั่นเปิดอยู่" : "หน้าคั่นปิดอยู่") + '</h3><p>' + description + '</p>' +
+      (enabled ? btn("guard-stop", "ปิดหน้าคั่นเพื่อใช้แอปการเงิน", "secondary") : btn("guard-settings", "เปิดหน้าคั่นในการตั้งค่า Android", "secondary")) + '</div>';
+  }
+  function stopGuard(button) {
+    if (!bridge || !bridge.stopGuard) {
+      if (bridge) bridge.openGuardSettings();
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "กำลังปิดหน้าคั่น…";
+    bridge.stopGuard();
+    var attempts = 0;
+    function check() {
+      if (!guardOn()) {
+        if (tab === "rules") render();
+        toast("ปิดหน้าคั่นแล้ว");
+      } else if (++attempts < 10) {
+        setTimeout(check, 250);
+      } else if (tab === "rules") {
+        render();
+        sheet("guard-stop-help", "ตรวจสถานะหน้าคั่น", "<p>Android ยังแสดงว่าบริการเปิดอยู่ ไปที่การช่วยเหลือพิเศษ เลือก Lock In แล้วปิดบริการ</p>" + btn("guard-settings", "เปิดการตั้งค่า Android", "secondary"));
+      }
+    }
+    setTimeout(check, 200);
+  }
   function rulesPage() {
     var rules = state.rules, apps = Object.keys(rules.apps), enabled = guardOn();
-    return "<div class=\"title-line\"><div><h1 class=\"page-title\">กฎแอป</h1><p class=\"small-spaced\">เลือกแอปที่อยากหยุดคิดสักนิดก่อนเปิด</p></div></div><div class=\"status-box\"><h3>" + (enabled ? "หน้าคั่นเปิดใช้งานแล้ว" : "เปิดหน้าคั่นบนเครื่อง") + "</h3><p>" + (enabled ? "กฎจะทำงานเมื่อเปิดแอปที่เลือก" : "เปิดบริการ Lock In ในเมนูการช่วยเหลือพิเศษ เพื่อให้ตรวจชื่อแอปที่อยู่หน้าจอและคั่นแอปที่เลือก") + "</p>" + btn("guard-settings", enabled ? "ดูการตั้งค่า Android" : "เปิดการตั้งค่า Android", "secondary") + "</div><div class=\"section\"><div class=\"section-head\"><h2>แอปที่อยากลด <span class=\"mini-count\">" + apps.length + "</span></h2>" + btn("apps", "เลือกแอป", "subtle-button", null, "plus") + "</div><div class=\"task-list\">" + (apps.length ? apps.map(function (p) {
+    return "<div class=\"title-line\"><div><h1 class=\"page-title\">กฎแอป</h1><p class=\"small-spaced\">เลือกแอปที่อยากหยุดคิดสักนิดก่อนเปิด</p></div></div>" + guardStatus(enabled) + "<div class=\"section\"><div class=\"section-head\"><h2>แอปที่อยากลด <span class=\"mini-count\">" + apps.length + "</span></h2>" + btn("apps", "เลือกแอป", "subtle-button", null, "plus") + "</div><div class=\"task-list\">" + (apps.length ? apps.map(function (p) {
       return appRuleRow(p, rules.apps[p]);
     }).join("") : "<p class=\"empty-line\">ยังไม่ได้เลือกแอป · เพิ่ม TikTok, Facebook, IG หรือแอปอื่นบนเครื่องได้</p>") + "</div></div><div class=\"section\"><div class=\"section-head\"><h2>เวลาพักร่วมกัน</h2></div><button class=\"option fill\" data-act=\"break-settings\"><span class=\"icon-soft peach\">" + icon("clock") + "</span><span class=\"row-main\"><strong>" + h(rules.breakMinutes || 5) + " นาทีเป็นค่าเริ่มต้น</strong><small>ปรับระยะเวลาของแต่ละรอบได้ที่หน้าคั่น</small></span>" + icon("right") + "</button></div>";
   }
@@ -810,6 +915,11 @@
       if (t && !t.done) {
         begin(t.id, 25);
       }
+      return true;
+    }
+    if (route.startsWith("habit-log:")) {
+      go("today");
+      if (getHabit(ref)) showHabitAmount(ref,false);
       return true;
     }
     if (route.startsWith("habit:")) {
@@ -924,7 +1034,15 @@
       saveHabit(ref);
       break;
     case "habit-plus":
-      addHabitCount(ref);
+    case "edit-last-amount":
+      showHabitAmount(ref,action==="edit-last-amount");
+      break;
+    case "preset-amount":
+      el("habit-amount").value=ref;
+      previewAmount();
+      break;
+    case "save-amount":
+      saveHabitAmount(ref);
       break;
     case "delete-task":
       removeItem("task", ref);
@@ -983,7 +1101,12 @@
       render();
       showFocus();
       break;
+    case "guard-stop":
+      var stopButton = document.querySelector('[data-act="guard-stop"]');
+      if (stopButton && !stopButton.disabled) stopGuard(stopButton);
+      break;
     case "guard-settings":
+      if (modal === "guard-stop-help") closeSheet();
       if (bridge)
         bridge.openGuardSettings();
       else
@@ -1062,6 +1185,7 @@
     }
   });
   document.addEventListener("input", function (e) {
+    if(e.target.id==="habit-amount")previewAmount();
     if (e.target.id === "habit-title") previewHabitIcon();
     if (e.target.id === "clock-hour" || e.target.id === "clock-minute") {
       el("clock-error").textContent = "";
@@ -1074,6 +1198,11 @@
     }
   });
   document.addEventListener("change", function (e) {
+    if(e.target.id==="amount-unit"){
+      var f=amountForm;
+      f.display=f.units.choices[e.target.value];
+      paintAmountPresets();previewAmount();
+    }
     if (e.target.id === "habit-icon") previewHabitIcon();
     if (e.target.name === "habit-period") el("period-help").textContent = periodHelp(e.target.value);
   });

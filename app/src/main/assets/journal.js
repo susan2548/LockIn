@@ -4,6 +4,8 @@
   var zone = null, data = null, scope = 'day', cursor = null, lastRoute = null;
   var followsToday = true, dialog = null, previousFocus = null;
   var trendMetric = 'focus';
+  var trendRange = 'month', selectedKey = '', weekAnchor = '';
+  var ranges = {week:'สัปดาห์',month:'เดือน',six:'6 เดือน',year:'ปี'};
   var months = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
   var shortMonths = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
   var weeks = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
@@ -37,7 +39,7 @@
   function monthName(d) { return months[d.getMonth()]+' '+(d.getFullYear()+543); }
   function dayName(d) { return d.getDate()+' '+monthName(d); }
   function shortDay(ts) { var d=new Date(ts); return d.getDate()+' '+shortMonths[d.getMonth()]; }
-  function fmt(n) { return Number(n||0).toLocaleString('en-US'); }
+  function fmt(n) { return Number(n||0).toLocaleString('en-US',{maximumFractionDigits:6}); }
   function clock(sec) {
     if (sec>0 && sec<60) return 'น้อยกว่า 1 นาที';
     var m=Math.floor(sec/60), h=Math.floor(m/60);
@@ -108,51 +110,136 @@
     return '<section class="jr-sec"><div class="jr-section-title"><h2>'+esc(title)+'</h2>'+(small?'<small>'+esc(small)+'</small>':'')+'</div>'+body+'</section>';
   }
   function stat(value,title) { return '<div><strong>'+esc(value)+'</strong><span>'+esc(title)+'</span></div>'; }
-  function monthlyHistory(end, events) {
-    var buckets=new Map(), options=new Map([
-      ['focus','เวลาโฟกัส'],['tasks','งานที่ทำเสร็จ'],['usage','เวลาในแอปที่เลือกคั่น']
-    ]);
-    for(var offset=5;offset>=0;offset--) {
-      var date=new Date(end.getFullYear(),end.getMonth()-offset,1,12);
-      if(date.getFullYear()>=1970) buckets.set(monthKey(date),{date:date,events:[]});
+  function trendData(end, events) {
+    var daily=trendRange==='month'||trendRange==='week', year=end.getFullYear(), month=end.getMonth();
+    var today=dateKey(new Date()), lastDay=new Date(year,month+1,0,12);
+    var anchor=monthKey(end)===today.slice(0,7)?fromKey(today):lastDay;
+    var first=new Date(year,month,1,12), length=lastDay.getDate();
+    if(trendRange==='week'){
+      if(weekAnchor.slice(0,7)===monthKey(end)) anchor=fromKey(weekAnchor);
+      first=new Date(year,month,anchor.getDate()-(anchor.getDay()+6)%7,12);
+      length=7;
+    } else if(trendRange==='six'){
+      first=new Date(year,month-5,1,12);length=6;
+    } else if(trendRange==='year'){
+      first=new Date(year,0,1,12);length=12;
+    }
+    var buckets=new Map(),options=new Map([['focus','เวลาโฟกัส'],['tasks','งานที่ทำเสร็จ'],['usage','เวลาในแอปที่เลือกคั่น']]);
+    function habitOption(h){ options.set(JSON.stringify([h.id||h.title||'',h.unit||'ครั้ง']),(h.title||'กิจวัตร')+' ('+(h.unit||'ครั้ง')+')'); }
+    (data.habits||[]).forEach(habitOption);
+    for(var i=0;i<length;i++){
+      var date=new Date(first.getFullYear(),first.getMonth()+(daily?0:i),first.getDate()+(daily?i:0),12);
+      if(date.getFullYear()<1970) continue;
+      var key=daily?dateKey(date):monthKey(date);
+      buckets.set(key,{date:date,key:key,events:[],future:key>(daily?today:today.slice(0,7))});
     }
     (events||[]).forEach(function(e){
-      if(!e || !(+e.at>0)) return;
-      var bucket=buckets.get(eventDay(e).slice(0,7));
-      if(bucket) bucket.events.push(e);
+      if(!e||!(+e.at>0))return;
+      var day=eventDay(e), bucket=buckets.get(daily?day:day.slice(0,7));
+      if(!bucket||day>today)return;
+      if(e.type==='habit')habitOption(e);
+      bucket.events.push(e);
     });
-    var series=Array.from(buckets.values()).map(function(bucket){
-      var summary=classify(bucket.events,'month',bucket.date);
-      var values=new Map([['focus',summary.focus],['tasks',summary.tasks.length],['usage',summary.usage]]);
-      summary.habits.forEach(function(h){
-        options.set(h.key,h.name+' ('+h.unit+')');
-        values.set(h.key,h.count);
-      });
-      return {date:bucket.date,summary:summary,values:values};
+    if(!options.has(trendMetric))trendMetric='focus';
+    var timed=trendMetric==='focus'||trendMetric==='usage';
+    var unit=timed?'นาที':trendMetric==='tasks'?'งาน':JSON.parse(trendMetric)[1];
+    var points=Array.from(buckets.values()).map(function(b){
+      var summary=classify(b.events,daily?'day':'month',b.date);
+      var value;
+      if(trendMetric==='focus')value=summary.focus/60;
+      else if(trendMetric==='usage')value=summary.usage/60;
+      else if(trendMetric==='tasks')value=summary.tasks.length;
+      else {var habit=summary.habits.find(function(h){return h.key===trendMetric;});value=habit?habit.count:0;}
+      return {key:b.key,date:b.date,value:value,future:b.future,recorded:summary.activities>0,
+        label:daily?dayName(b.date):monthName(b.date), tick:daily?String(b.date.getDate()):shortMonths[b.date.getMonth()]};
     });
-    if(!options.has(trendMetric)) trendMetric='focus';
-    return {series:series,options:options};
+    var available=points.filter(function(p){return !p.future;});
+    var selected=points.findIndex(function(p){return p.key===selectedKey&&!p.future;});
+    if(selected<0){
+      var latest=available.filter(function(p){return p.recorded;}).pop();
+      selected=points.indexOf(latest||available[available.length-1]);
+    }
+    var recorded=available.filter(function(p){return p.recorded;});
+    var total=recorded.reduce(function(s,p){return s+p.value;},0);
+    var peak=Math.max.apply(null,points.map(function(p){return p.value;}));
+    var step=Math.pow(10,Math.floor(Math.log10(peak||1)));
+    var scale=Math.max(1, Math.ceil(peak/step)*step);
+    return {points:points,options:options,daily:daily,unit:unit,selected:selected,scale:scale,
+      total:total,average:recorded.length?total/recorded.length:0,count:recorded.length};
   }
-  function trendValues(history) {
-    var timed=trendMetric==='focus' || trendMetric==='usage';
-    var unit=timed?'':trendMetric==='tasks'?'งาน':JSON.parse(trendMetric)[1];
-    return history.series.map(function(month){
-      var value=month.values.get(trendMetric)||0;
-      return {date:month.date,value:value,recorded:month.summary.activities>0,
-        text:!month.summary.activities?'ไม่มีบันทึก':timed?clock(value):fmt(value)+' '+unit};
-    });
+  function chartNumber(n){
+    var precision=trendMetric==='focus'||trendMetric==='usage'||trendMetric==='tasks'?1:6;
+    var smallest=Math.pow(10,-precision);
+    return n>0&&n<smallest?'<'+smallest:n.toLocaleString('th-TH',{maximumFractionDigits:precision});
   }
-  function trendChart(history) {
-    var points=trendValues(history), max=Math.max.apply(null,points.map(function(p){return p.value;}))||1;
-    var choices=Array.from(history.options).map(function(pair){
+  function tickShown(i,length){
+    if(length<=7)return true;
+    if(length===12)return i%2===0||i===11;
+    return i%7===0 && length-i>3 || i===length-1;
+  }
+  function trendChart(g) {
+    var choices=Array.from(g.options).map(function(pair){
       return '<option value="'+esc(pair[0])+'"'+(trendMetric===pair[0]?' selected':'')+'>'+esc(pair[1])+'</option>';
     }).join('');
-    var rows=points.map(function(p,index){
-      var partial=monthKey(p.date)===monthKey(new Date());
-      return '<li'+(index===points.length-1?' class="selected"':'')+'><div><span>'+monthName(p.date)+(partial?' · ถึงวันนี้':'')+'</span><strong>'+esc(p.text)+'</strong></div>'+
-        '<div aria-hidden="true" class="trend-track'+(p.recorded?'':' missing')+'"><i style="width:'+100*p.value/max+'%"></i></div></li>';
+    var tabs=Object.keys(ranges).map(function(k){
+      return '<button type="button" data-range="'+k+'" aria-pressed="'+(trendRange===k)+'">'+ranges[k]+'</button>';
     }).join('');
-    return section('เปรียบเทียบรายเดือน','<label class="trend-filter">ดูตาม<select data-jmetric>'+choices+'</select></label><ol class="trend-bars">'+rows+'</ol>',points.length+' เดือน');
+    var bars=g.points.map(function(p,i){
+      return '<div class="plot-col'+(p.future?' future':'')+'" data-index="'+i+'"><i style="height:'+100*p.value/g.scale+'%"></i></div>';
+    }).join('');
+    var ticks=g.points.map(function(p,i){return '<span>'+ (tickShown(i,g.points.length)?p.tick:'')+'</span>';}).join('');
+    var axes=[g.scale,g.scale/2,0].map(function(v){return '<span>'+esc(chartNumber(v))+'</span>';}).join('');
+    var avgLabel='เฉลี่ยต่อ'+(g.daily?'วัน':'เดือน')+'ที่มีบันทึก';
+    var summary=function(value){return g.count?esc(chartNumber(value)+' '+g.unit):'—';};
+    var weekNav='';
+    if(trendRange==='week'){
+      var first=g.points[0].date,last=g.points[g.points.length-1].date;
+      weekNav='<div class="plot-week"><button data-week="-1" aria-label="สัปดาห์ก่อนหน้า" '+(dateKey(first)<=monthKey(cursor)+'-01'?'disabled':'')+'>'+icon('left',16)+'</button>'+
+        shortDay(first)+' – '+shortDay(last)+'<button data-week="1" aria-label="สัปดาห์ถัดไป" '+(monthKey(last)>monthKey(cursor)||last.getDate()===new Date(cursor.getFullYear(),cursor.getMonth()+1,0).getDate()||dateKey(last)>=dateKey(new Date())?'disabled':'')+'>'+icon('right',16)+'</button></div>';
+    }
+    return section('กราฟกิจกรรม','<label class="trend-filter">ดูตาม<select data-jmetric>'+choices+'</select></label>'+
+      '<div class="plot-ranges">'+tabs+'</div>'+weekNav+'<div class="plot-reading"><small data-plot-date></small><strong data-plot-value></strong></div>'+
+      '<div class="plot-area"><div class="plot-slider" role="slider" tabindex="0" aria-label="เลือก'+(g.daily?'วัน':'เดือน')+'บนกราฟ" aria-valuemin="1">'+bars+'</div><div class="plot-axis" aria-hidden="true">'+axes+'</div></div>'+
+      '<div class="plot-ticks" aria-hidden="true">'+ticks+'</div><div class="plot-stats">'+statRaw(summary(g.total),'รวม')+statRaw(summary(g.average),avgLabel)+'</div>');
+  }
+  function statRaw(value,label){return '<div><small>'+label+'</small><strong>'+value+'</strong></div>';}
+  function bindChart(g){
+    var slider=zone.querySelector('.plot-slider'), cols=slider.children;
+    var last=g.points.filter(function(p){return !p.future;}).length-1;
+    slider.setAttribute('aria-valuemax',last+1);
+    function select(index,remember){
+      index=Math.max(0,Math.min(last,index));
+      var point=g.points[index];
+      if(!point)return;
+      cols[g.selected].classList.remove('picked');
+      g.selected=index; cols[index].classList.add('picked');
+      if(remember)selectedKey=point.key;
+      var value=point.recorded?chartNumber(point.value)+' '+g.unit:'ไม่มีบันทึก';
+      zone.querySelector('[data-plot-date]').textContent=point.label;
+      zone.querySelector('[data-plot-value]').textContent=value;
+      slider.setAttribute('aria-valuenow',index+1);
+      slider.setAttribute('aria-valuetext',point.label+' '+value);
+    }
+    select(g.selected,false);
+    function at(x){var rect=slider.getBoundingClientRect();return Math.floor((x-rect.left)/rect.width*cols.length);}
+    slider.onpointerdown=function(e){
+      if(e.button!==0||at(e.clientX)>last)return;
+      slider.setPointerCapture(e.pointerId);select(at(e.clientX),true);
+    };
+    slider.onpointermove=function(e){if(slider.hasPointerCapture(e.pointerId))select(at(e.clientX),true);};
+    slider.onkeydown=function(e){
+      var keys={ArrowLeft:g.selected-1,ArrowRight:g.selected+1,Home:0,End:last};
+      if(Object.prototype.hasOwnProperty.call(keys,e.key)){e.preventDefault();select(keys[e.key],true);}
+    };
+    zone.querySelectorAll('[data-range]').forEach(function(b){b.onclick=function(){
+      if(trendRange===b.dataset.range)return;
+      trendRange=b.dataset.range;selectedKey='';weekAnchor='';repaint();zone.querySelector('[data-range="'+trendRange+'"]').focus({preventScroll:true});
+    };});
+    zone.querySelectorAll('[data-week]').forEach(function(b){b.onclick=function(){
+      var anchor=new Date(g.points[0].date);anchor.setDate(anchor.getDate()+(b.dataset.week==='1'?7:-1));
+      if(monthKey(anchor)<monthKey(cursor))anchor=new Date(cursor.getFullYear(),cursor.getMonth(),1,12);
+      weekAnchor=dateKey(anchor);selectedKey='';repaint();
+    };});
   }
   function hero(s,isMonth) {
     var monthlyDays=Object.keys(s.days).length;
@@ -191,8 +278,8 @@
     if(!zone || !data) return;
     if(followsToday) cursor=fromKey(dateKey(new Date()));
     var m=scope==='month', today=dateKey(new Date());
-    var history=m?monthlyHistory(cursor,data.events):null;
-    var s=m?history.series[history.series.length-1].summary:classify(data.events,scope,cursor);
+    var history=m?trendData(cursor,data.events):null;
+    var s=classify(data.events,scope,cursor);
     var title=m?monthName(cursor):dayName(cursor), key=m?monthKey(cursor):dateKey(cursor);
     var atEnd=m?key===today.slice(0,7):key===today;
     var atStart=m?key==='1970-01':key==='1970-01-01';
@@ -221,6 +308,7 @@
     zone.querySelectorAll('[data-jday]').forEach(function(b){b.onclick=function(){
       cursor=bound(fromKey(b.dataset.jday)); scope='day'; followsToday=dateKey(cursor)===dateKey(new Date()); repaint();
     };});
+    if(m) bindChart(history);
     if(m) zone.querySelector('[data-jmetric]').onchange=function(e){
       trendMetric=e.target.value;
       repaint();
@@ -276,8 +364,8 @@
     var first=(new Date(date.getFullYear(),date.getMonth(),1).getDay()+6)%7;
     var nd=new Date(date.getFullYear(),date.getMonth()+1,0).getDate(), lines=Math.ceil((first+nd)/7);
     var calH=monthly?138+lines*65:0;
-    var points=monthly && (trendMetric!=='usage'||showApps)?trendValues(history):[];
-    var trendH=points.length?105+points.length*66:0;
+    var points=monthly && (trendMetric!=='usage'||showApps)?history.points:[];
+    var trendH=points.length?445:0;
     var base=437, h=base+calH+trendH+blocks.reduce(function(t,b){return t+84+b.rows.length*53+(b.count?36:0);},0)+(s.activities?0:77)+92;
     var canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
     var ctx=canvas.getContext('2d');
@@ -306,18 +394,25 @@
     });
     var y=base;
     if(points.length) {
-      label('เปรียบเทียบรายเดือน',padX,y+40,34,ink,'700');
-      label(history.options.get(trendMetric),padX,y+78,25,muted,'500',w-2*padX);
-      var max=Math.max.apply(null,points.map(function(p){return p.value;}))||1;
-      points.forEach(function(p,index){
-        var by=y+120+index*66;
-        label(monthName(p.date)+(monthKey(p.date)===monthKey(new Date())?' · ถึงวันนี้':''),padX,by,24,ink);
-        label(p.text,w-padX,by,24,muted,'500',290,'right');
-        ctx.fillStyle=soft;
-        ctx.fillRect(padX,by+10,w-2*padX,p.recorded?8:1);
-        ctx.fillStyle=index===points.length-1?'#284ed9':'#8aa3ed';
-        ctx.fillRect(padX,by+10,(w-2*padX)*p.value/max,8);
+      label(history.options.get(trendMetric)+' · '+ranges[trendRange],padX,y+40,32,ink,'700',w-2*padX);
+      var picked=points[history.selected];
+      label(picked.label+' · '+(picked.recorded?chartNumber(picked.value)+' '+history.unit:'ไม่มีบันทึก'),padX,y+85,26,muted);
+      var chartWidth=w-2*padX-70, step=chartWidth/points.length, baseline=y+302;
+      [0,0.5,1].forEach(function(frac){
+        var pos=baseline-168*frac;
+        line(padX,pos,padX+chartWidth,pos,'#dce8e0');
+        label(chartNumber(history.scale*frac),w-padX,pos+6,18,muted,'500',65,'right');
       });
+      points.forEach(function(p,i){
+        var center=padX+(i+.5)*step,height=168*p.value/history.scale;
+        if(i===history.selected)line(center,baseline-168,center,baseline+5,'#509769',2);
+        ctx.fillStyle=i===history.selected?'#22744a':'#8ebf9d';
+        ctx.fillRect(center-step*.24,baseline-height,step*.48,height);
+        if(tickShown(i,points.length))label(p.tick,center,baseline+31,18,muted,'500',null,'center');
+      });
+      var printed=function(v){return history.count?chartNumber(v)+' '+history.unit:'—';};
+      label('รวม '+printed(history.total),padX,y+383,24,ink,'600',340);
+      label('เฉลี่ยต่อ'+(history.daily?'วัน':'เดือน')+'ที่มีบันทึก '+printed(history.average),w-padX,y+383,24,ink,'600',425,'right');
       y+=trendH;
     }
     if(monthly){

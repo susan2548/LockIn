@@ -64,7 +64,7 @@ public final class Store extends SQLiteOpenHelper {
             result.put("habits",new JSONArray(get(d,"habits")));
             result.put("rules",new JSONObject(get(d,"rules")));
             JSONArray events=new JSONArray();
-            try (Cursor cr=d.rawQuery("SELECT type,at,item,title,value,note,pkg,unit,day,session,icon FROM events ORDER BY at,seq",null)) {
+            try (Cursor cr=d.rawQuery("SELECT type,at,item,title,value,note,pkg,unit,day,session,icon,seq FROM events ORDER BY at,seq",null)) {
                 while(cr.moveToNext()) {
                     JSONObject e=new JSONObject();
                     e.put("type",cr.getString(0)); e.put("at",cr.getLong(1));
@@ -72,6 +72,7 @@ public final class Store extends SQLiteOpenHelper {
                     e.put("note",cr.getString(5)); e.put("pkg",cr.getString(6)); e.put("unit",cr.getString(7));
                     e.put("day",cr.getString(8)); e.put("session",cr.getString(9));
                     if (!cr.isNull(10)) e.put("icon",cr.getString(10));
+                    if ("habit".equals(cr.getString(0))) e.put("seq",cr.getLong(11));
                     events.put(e);
                 }
             }
@@ -134,6 +135,20 @@ public final class Store extends SQLiteOpenHelper {
         d.beginTransaction();
         try { append(d,type,id,title,value,note,pkg,unit,at,"",icon); d.setTransactionSuccessful(); }
         finally { d.endTransaction(); }
+    }
+    static boolean reviseHabit(Context c,long seq,String id,double original,double value) {
+        if (!Double.isFinite(value) || value <= 0 || value > 9007199254740991d) return false;
+        String sql = "UPDATE events SET value=? WHERE seq=? AND type='habit' AND item=? AND value=? " +
+            "AND day=? AND seq=(SELECT newer.seq FROM events AS newer WHERE newer.type='habit' " +
+            "AND newer.item=events.item AND newer.unit=events.unit AND newer.day=events.day ORDER BY newer.at DESC,newer.seq DESC LIMIT 1)";
+        try (android.database.sqlite.SQLiteStatement update=db(c).compileStatement(sql)) {
+            update.bindDouble(1,value);
+            update.bindLong(2,seq);
+            update.bindString(3,id);
+            update.bindDouble(4,original);
+            update.bindString(5,day(System.currentTimeMillis()));
+            return update.executeUpdateDelete()==1;
+        }
     }
     private static JSONObject parseFocus(String text) {
         try { return new JSONObject(text); } catch(JSONException ex) { return null; }

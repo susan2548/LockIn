@@ -124,9 +124,17 @@ public class MainActivity extends Activity {
                 JSONObject e=new JSONObject(raw);
                 String type=e.getString("type");
                 if(!"habit".equals(type) && !"note".equals(type))return;
-                Store.event(MainActivity.this,type,e.optString("id"),e.optString("title"),e.optDouble("value",1),e.optString("note"),"",e.optString("unit"),System.currentTimeMillis(), "habit".equals(type) ? e.optString("icon") : null);
+                double value="habit".equals(type) ? e.getDouble("value") : e.optDouble("value",1);
+                if ("habit".equals(type) && (!Double.isFinite(value) || value <= 0 || value > 9007199254740991d))
+                    throw new IllegalArgumentException("Invalid quantity");
+                Store.event(MainActivity.this,type,e.optString("id"),e.optString("title"),value,e.optString("note"),"",e.optString("unit"),System.currentTimeMillis(), "habit".equals(type) ? e.optString("icon") : null);
                 Alerts.reschedule(MainActivity.this);
             } catch(JSONException ex){throw new IllegalArgumentException(ex);}
+        }
+        @JavascriptInterface public boolean reviseHabit(long seq,String id,double original,double value){
+            boolean updated=Store.reviseHabit(MainActivity.this,seq,id,original,value);
+            if(updated) Alerts.reschedule(MainActivity.this);
+            return updated;
         }
         @JavascriptInterface public void startFocus(String id,String title,int minutes){Store.startFocus(MainActivity.this,id,title,minutes);}
         @JavascriptInterface public void finishFocus(){Store.finishFocus(MainActivity.this);}
@@ -142,6 +150,13 @@ public class MainActivity extends Activity {
                 if(component!=null && getPackageName().equals(component.getPackageName()) && GuardService.class.getName().equals(component.getClassName()))return true;
             }
             return false;
+        }
+        @JavascriptInterface public void stopGuard(){
+            runOnUiThread(()->{
+                GuardService service=GuardService.active();
+                if(service!=null) service.disableSelf();
+                else startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            });
         }
         @JavascriptInterface public void openGuardSettings(){
             runOnUiThread(()->startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
