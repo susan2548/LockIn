@@ -18,7 +18,7 @@ import java.util.Date;
 public final class Store extends SQLiteOpenHelper {
     private static Store instance;
 
-    private Store(Context context) { super(context.getApplicationContext(), "pordee.db", null, 1); }
+    private Store(Context context) { super(context.getApplicationContext(), "pordee.db", null, 2); }
 
     private static synchronized SQLiteDatabase db(Context c) {
         if (instance == null) instance = new Store(c);
@@ -27,7 +27,7 @@ public final class Store extends SQLiteOpenHelper {
 
     @Override public void onCreate(SQLiteDatabase d) {
         d.execSQL("CREATE TABLE settings(k TEXT PRIMARY KEY,v TEXT NOT NULL)");
-        d.execSQL("CREATE TABLE events(seq INTEGER PRIMARY KEY, type TEXT, at INTEGER, item TEXT, title TEXT, value REAL, note TEXT, pkg TEXT, unit TEXT, day TEXT, session TEXT)");
+        d.execSQL("CREATE TABLE events(seq INTEGER PRIMARY KEY, type TEXT, at INTEGER, item TEXT, title TEXT, value REAL, note TEXT, pkg TEXT, unit TEXT, day TEXT, session TEXT, icon TEXT)");
         d.execSQL("CREATE INDEX by_usage ON events(type,pkg,day)");
         d.execSQL("CREATE INDEX by_item ON events(type,item,seq)");
         save(d, "tasks","[]");
@@ -35,7 +35,9 @@ public final class Store extends SQLiteOpenHelper {
         save(d, "rules","{\"apps\":{},\"breakMinutes\":5,\"dailyTime\":\"22:30\",\"quietStart\":\"\",\"quietEnd\":\"\"}");
         save(d, "focus","null");
     }
-    @Override public void onUpgrade(SQLiteDatabase d,int oldVersion,int newVersion) { }
+    @Override public void onUpgrade(SQLiteDatabase d,int oldVersion,int newVersion) {
+        if (oldVersion < 2) d.execSQL("ALTER TABLE events ADD COLUMN icon TEXT");
+    }
     private static void save(SQLiteDatabase d,String k,String v) {
         ContentValues row=new ContentValues(); row.put("k",k); row.put("v",v);
         d.insertWithOnConflict("settings",null,row,SQLiteDatabase.CONFLICT_REPLACE);
@@ -62,13 +64,15 @@ public final class Store extends SQLiteOpenHelper {
             result.put("habits",new JSONArray(get(d,"habits")));
             result.put("rules",new JSONObject(get(d,"rules")));
             JSONArray events=new JSONArray();
-            try (Cursor cr=d.rawQuery("SELECT type,at,item,title,value,note,pkg,unit,day,session FROM events ORDER BY at,seq",null)) {
+            try (Cursor cr=d.rawQuery("SELECT type,at,item,title,value,note,pkg,unit,day,session,icon FROM events ORDER BY at,seq",null)) {
                 while(cr.moveToNext()) {
                     JSONObject e=new JSONObject();
                     e.put("type",cr.getString(0)); e.put("at",cr.getLong(1));
                     e.put("id",cr.getString(2)); e.put("title",cr.getString(3)); e.put("value",cr.getDouble(4));
                     e.put("note",cr.getString(5)); e.put("pkg",cr.getString(6)); e.put("unit",cr.getString(7));
-                    e.put("day",cr.getString(8)); e.put("session",cr.getString(9)); events.put(e);
+                    e.put("day",cr.getString(8)); e.put("session",cr.getString(9));
+                    if (!cr.isNull(10)) e.put("icon",cr.getString(10));
+                    events.put(e);
                 }
             }
             result.put("events",events);
@@ -91,11 +95,11 @@ public final class Store extends SQLiteOpenHelper {
                     String id=task.getString("id"), title=task.getString("title"), note=task.optString("note");
                     JSONObject before=old.get(id);
                     boolean wasDone=before!=null && before.optBoolean("done");
-                    if(task.optBoolean("done") && !wasDone) append(d,"task",id,title,1,"","","",at,"");
+                    if(task.optBoolean("done") && !wasDone) append(d,"task",id,title,1,"","","",at,"",null);
                     if(!task.optBoolean("done") && wasDone)
                         d.execSQL("DELETE FROM events WHERE seq=(SELECT MAX(seq) FROM events WHERE type='task' AND item=?)",new String[]{id});
                     if(!note.isEmpty() && (before==null || !note.equals(before.optString("note"))))
-                        append(d,"note",id,title,1,note,"","",at,"");
+                        append(d,"note",id,title,1,note,"","",at,"",null);
                 }
             } else if ("habits".equals(k)) { new JSONArray(json); }
             else if ("rules".equals(k)) { new JSONObject(json); }
@@ -106,7 +110,7 @@ public final class Store extends SQLiteOpenHelper {
         changed(c);
     }
     private static String day(long at) { return new SimpleDateFormat("yyyy-MM-dd",Locale.US).format(new Date(at)); }
-    private static void append(SQLiteDatabase d,String type,String id,String title,double value,String note,String pkg,String unit,long at,String session) {
+    private static void append(SQLiteDatabase d,String type,String id,String title,double value,String note,String pkg,String unit,long at,String session,String icon) {
         String date=day(at);
         if ("usage".equals(type)) {
             try(Cursor cr=d.rawQuery("SELECT seq FROM events WHERE type='usage' AND pkg=? AND day=? LIMIT 1",new String[]{pkg,date})) {
@@ -119,12 +123,16 @@ public final class Store extends SQLiteOpenHelper {
         ContentValues v=new ContentValues();
         v.put("type",type);v.put("at",at);v.put("item",id);v.put("title",title);v.put("value",value);
         v.put("note",note);v.put("pkg",pkg);v.put("unit",unit);v.put("day",date);v.put("session",session);
+        if (icon != null && !icon.isEmpty()) v.put("icon",icon);
         d.insertOrThrow("events",null,v);
     }
     public static void event(Context c,String type,String id,String title,double value,String note,String pkg,String unit,long at) {
+        event(c,type,id,title,value,note,pkg,unit,at,null);
+    }
+    public static void event(Context c,String type,String id,String title,double value,String note,String pkg,String unit,long at,String icon) {
         SQLiteDatabase d=db(c);
         d.beginTransaction();
-        try { append(d,type,id,title,value,note,pkg,unit,at,""); d.setTransactionSuccessful(); }
+        try { append(d,type,id,title,value,note,pkg,unit,at,"",icon); d.setTransactionSuccessful(); }
         finally { d.endTransaction(); }
     }
     private static JSONObject parseFocus(String text) {
@@ -138,7 +146,7 @@ public final class Store extends SQLiteOpenHelper {
             midnight.add(Calendar.DAY_OF_MONTH,1); midnight.set(Calendar.HOUR_OF_DAY,0);
             midnight.set(Calendar.MINUTE,0);midnight.set(Calendar.SECOND,0);midnight.set(Calendar.MILLISECOND,0);
             long partEnd=Math.min(end,midnight.getTimeInMillis());
-            append(d,"focus",focus.optString("taskId"),focus.optString("title"),(partEnd-cursor)/1000d,"","","",cursor,String.valueOf(start));
+            append(d,"focus",focus.optString("taskId"),focus.optString("title"),(partEnd-cursor)/1000d,"","","",cursor,String.valueOf(start),null);
             cursor=partEnd;
         }
     }

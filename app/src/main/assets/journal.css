@@ -64,3 +64,14 @@
 .jr-row { padding:11px 0; }
 .jr-day { border-radius:7px; }
 .jr-save { background:#284ed9; color:white!important; border:0; }
+.jr-row .app-monogram { flex-basis:30px; height:30px; border-radius:8px; }
+.trend-filter { display:flex; align-items:center; gap:10px; color:var(--jr-muted); font-size:13px; }
+.trend-filter select { flex:1; min-width:0; min-height:44px; border:1px solid var(--jr-line); border-radius:8px; padding:6px 9px; font:inherit; color:var(--jr-ink); background:white; }
+.trend-bars { list-style:none; padding:0; margin:16px 0 2px; }
+.trend-bars li+li { margin-top:12px; }
+.trend-bars li>div:first-child { display:flex; justify-content:space-between; gap:8px; align-items:baseline; font-size:13px; }
+.trend-bars strong { text-align:right; font-weight:600; font-variant-numeric:tabular-nums; }
+.trend-track { height:7px; border-radius:4px; background:#edf0f8; margin-top:4px; overflow:hidden; }
+.trend-track i { display:block; height:100%; background:#8aa3ed; border-radius:inherit; }
+.selected .trend-track i { background:#284ed9; }
+.trend-track.missing { height:0; margin:7px 0 3px; border-top:1px dashed #b7c3da; border-radius:0; }

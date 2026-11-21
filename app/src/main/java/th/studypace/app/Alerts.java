@@ -288,7 +288,7 @@ public class Alerts extends BroadcastReceiver {
                     if (habit == null || !id.equals(habit.optString("id"))) continue;
                     if (logged(habit, array(data, "events"), today, zone) < Math.max(1, habit.optDouble("goal", 1))) {
                         Store.event(context, "habit", id, habit.optString("title"), 1, "", "",
-                            habit.optString("unit", "ครั้ง"), now);
+                            habit.optString("unit", "ครั้ง"), now, habit.optString("icon"));
                     }
                     break;
                 }

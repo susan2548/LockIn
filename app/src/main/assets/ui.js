@@ -62,8 +62,6 @@
     play: "M8 4.8l11 7.2-11 7.2z",
     right: "M9 5l7 7-7 7",
     close: "M6 6l12 12 M18 6L6 18",
-    water: "M12 2.3C10 5.8 5.3 10.3 5.3 14.7a6.7 6.7 0 0 0 13.4 0C18.7 10.3 14 5.8 12 2.3z M9 15c0 1.6 1.2 2.7 2.6 2.9",
-    exercise: "M4 8v8 M7 5v14 M7 12h10 M17 5v14 M20 8v8",
     leaf: "M4.5 17C3 9 9 5 20 4c-.6 11.5-5.3 17-11 15.1 M4 21l11-11",
     task: "M8.5 4H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2.5 M9 2.8h6v4H9z M8 13l2.5 2.5 5-5",
     clock: "M12 3a9 9 0 1 0 .01 0 M12 6.5v6l3.8 1.8",
@@ -339,6 +337,7 @@
       id: x.id,
       title: x.title,
       unit: x.unit,
+      icon: x.icon || "",
       value: 1
     });
     render();
@@ -366,8 +365,8 @@
   }
   function habitRow(x) {
     var n = habitCount(x);
-    var kind = x.id === "water" ? "water" : x.id === "exercise" ? "exercise" : "leaf";
-    return "<div class=\"habit-row\"><span class=\"icon-soft " + (kind === "exercise" ? "peach" : "") + "\">" + icon(kind) + "</span><button class=\"row-main\" data-act=\"edit-habit\" data-id=\"" + h(x.id) + "\"><strong>" + h(x.title) + "</strong><small>" + n + " / " + h(x.goal) + " " + h(x.unit) + (x.period === "week" ? " สัปดาห์นี้" : " วันนี้") + "</small><span class=\"mini-progress\"><i style=\"width:" + Math.min(100, 100 * n / Math.max(1, x.goal)) + "%\"></i></span></button><button data-act=\"habit-plus\" data-id=\"" + h(x.id) + "\" class=\"round-step\" aria-label=\"" + h(x.title + " เพิ่มหนึ่ง" + x.unit) + "\">" + icon("plus") + "</button></div>";
+    var kind = LockInIcons.resolve(x.title, x.icon);
+    return "<div class=\"habit-row\"><span class=\"icon-soft " + (kind.key === "exercise" ? "peach" : "") + "\">" + LockInIcons.glyph(kind, 24) + "</span><button class=\"row-main\" data-act=\"edit-habit\" data-id=\"" + h(x.id) + "\"><strong>" + h(x.title) + "</strong><small>" + n + " / " + h(x.goal) + " " + h(x.unit) + (x.period === "week" ? " สัปดาห์นี้" : " วันนี้") + "</small><span class=\"mini-progress\"><i style=\"width:" + Math.min(100, 100 * n / Math.max(1, x.goal)) + "%\"></i></span></button><button data-act=\"habit-plus\" data-id=\"" + h(x.id) + "\" class=\"round-step\" aria-label=\"" + h(x.title + " เพิ่มหนึ่ง" + x.unit) + "\">" + icon("plus") + "</button></div>";
   }
   function streakPanel() {
     var totals = Object.create(null);
@@ -577,6 +576,18 @@
   function periodHelp(period) {
     return period === "week" ? "สะสมยอดตั้งแต่จันทร์ถึงอาทิตย์ เริ่มนับใหม่ทุกวันจันทร์" : "สะสมยอดภายในวันเดียว เริ่มนับใหม่ตอนเที่ยงคืน";
   }
+  function habitIconField(x) {
+    var type = LockInIcons.resolve(x.title, x.icon);
+    var choices = '<option value="">อัตโนมัติตามชื่อ</option>' + LockInIcons.types.map(function (t) {
+      return '<option value="' + t.key + '"' + (t.key === x.icon ? ' selected' : '') + '>' + t.label + '</option>';
+    }).join("");
+    return '<label class="field">ไอคอนกิจวัตร<span class="habit-icon-field"><span class="icon-soft" id="habit-icon-preview">' +
+      LockInIcons.glyph(type, 22) + '</span><select id="habit-icon">' + choices + '</select></span></label>';
+  }
+  function previewHabitIcon() {
+    var type = LockInIcons.resolve(v("habit-title"), v("habit-icon"));
+    el("habit-icon-preview").innerHTML = LockInIcons.glyph(type, 22);
+  }
   function habitEditor(ref) {
     var x = getHabit(ref) || {
       title: "",
@@ -585,7 +596,7 @@
       unit: "ครั้ง",
       time: ""
     };
-    sheet("habit-editor", ref ? "แก้ไขกิจวัตร" : "เพิ่มกิจวัตร", inputField("habit-title", "ชื่อกิจวัตร", "text", x.title, "maxlength=\"100\" placeholder=\"เช่น เดินหลังเลิกเรียน\"") + "<div class=\"fields-2\">" + inputField("habit-goal", "เป้าหมาย", "number", x.goal, "min=\"1\" max=\"999\" step=\"1\"") + inputField("habit-unit", "หน่วย", "text", x.unit, "maxlength=\"22\"") + "</div>" + habitPeriod(x.period === "week" ? "week" : "day") + inputField("habit-time", "เวลาเตือนในวันที่ยังไม่ครบเป้า (ถ้ามี)", "time", x.time) + footer("save-habit", "บันทึกกิจวัตร", ref ? "delete-habit" : null, ref), ref);
+    sheet("habit-editor", ref ? "แก้ไขกิจวัตร" : "เพิ่มกิจวัตร", inputField("habit-title", "ชื่อกิจวัตร", "text", x.title, "maxlength=\"100\" placeholder=\"เช่น เดินหลังเลิกเรียน\"") + habitIconField(x) + "<div class=\"fields-2\">" + inputField("habit-goal", "เป้าหมาย", "number", x.goal, "min=\"1\" max=\"999\" step=\"1\"") + inputField("habit-unit", "หน่วย", "text", x.unit, "maxlength=\"22\"") + "</div>" + habitPeriod(x.period === "week" ? "week" : "day") + inputField("habit-time", "เวลาเตือนในวันที่ยังไม่ครบเป้า (ถ้ามี)", "time", x.time) + footer("save-habit", "บันทึกกิจวัตร", ref ? "delete-habit" : null, ref), ref);
   }
   function saveHabit(ref) {
     var title = v("habit-title"), unit = v("habit-unit"), goal = Number(v("habit-goal"));
@@ -600,6 +611,7 @@
         id: ref || id(),
         title: title,
         unit: unit,
+        icon: v("habit-icon"),
         goal: goal,
         period: overlay.querySelector('input[name="habit-period"]:checked').value,
         time: v("habit-time")
@@ -686,13 +698,9 @@
       }
     ];
   }
-  function appIcon(pkg, name) {
-    var image = bridge ? '<img loading="lazy" decoding="async" alt="" src="/icons/' + encodeURIComponent(pkg) + '.png" onerror="this.remove()">' : "";
-    return '<span class="app-monogram" aria-hidden="true">' + h(Array.from(name || pkg || "•")[0]) + image + '</span>';
-  }
   function appRuleRow(pkg, record) {
     var mode = record.mode === "focus" ? "เฉพาะโฟกัส" : "คั่นทุกครั้ง";
-    return '<div class="list-row rule-app">' + appIcon(pkg, record.name) + '<span class="row-main"><strong>' +
+    return '<div class="list-row rule-app">' + LockInIcons.app(pkg, record.name) + '<span class="row-main"><strong>' +
       h(record.name || pkg) + '</strong></span><button class="rule-mode" aria-haspopup="dialog" data-act="edit-rule" data-id="' +
       h(pkg) + '" aria-label="' + h((record.name || pkg) + " · " + mode) + '">' + mode + icon("chevron") + '</button></div>';
   }
@@ -706,7 +714,7 @@
         description + '</small></span><span class="choice-dot" aria-hidden="true">' + (selected ? '✓' : '') + '</span></button>';
     }
     var name = app.name || pkg;
-    sheet("rule", "ตั้งหน้าคั่น", '<div class="rule-identity">' + appIcon(pkg, name) + '<b>' + h(name) + '</b></div><div class="mode-options">' +
+    sheet("rule", "ตั้งหน้าคั่น", '<div class="rule-identity">' + LockInIcons.app(pkg, name) + '<b>' + h(name) + '</b></div><div class="mode-options">' +
       option("always", "คั่นทุกครั้ง", "คั่นเมื่อเปิดแอป ยกเว้นช่วงพักที่คุณเลือก", "shield") +
       option("focus", "เฉพาะตอนโฟกัส", "ใช้งานได้ตามปกตินอกรอบโฟกัส", "clock") + '</div>' +
       btn("remove-rule", "เอาออกจากรายการคั่น", "remove-rule"), pkg);
@@ -740,7 +748,7 @@
     });
     root.innerHTML = entries.length ? entries.map(function (a) {
       var checked = !!state.rules.apps[a.pkg];
-      return "<button class=\"picker-item\" data-act=\"pick-app\" data-id=\"" + h(a.pkg) + "\" aria-pressed=\"" + checked + "\">" + appIcon(a.pkg, a.name) + "<span class=\"row-main\">" + h(a.name) + "</span><span class=\"mark\">" + (checked ? "เลือกแล้ว" : "เพิ่ม") + "</span></button>";
+      return "<button class=\"picker-item\" data-act=\"pick-app\" data-id=\"" + h(a.pkg) + "\" aria-pressed=\"" + checked + "\">" + LockInIcons.app(a.pkg, a.name) + "<span class=\"row-main\">" + h(a.name) + "</span><span class=\"mark\">" + (checked ? "เลือกแล้ว" : "เพิ่ม") + "</span></button>";
     }).join("") : "<p class=\"empty-line\">ไม่พบแอปที่ตรงกับการค้นหา</p>";
   }
   function updateMode(pkg, mode, name) {
@@ -1054,6 +1062,7 @@
     }
   });
   document.addEventListener("input", function (e) {
+    if (e.target.id === "habit-title") previewHabitIcon();
     if (e.target.id === "clock-hour" || e.target.id === "clock-minute") {
       el("clock-error").textContent = "";
       markTimePreset();
@@ -1065,6 +1074,7 @@
     }
   });
   document.addEventListener("change", function (e) {
+    if (e.target.id === "habit-icon") previewHabitIcon();
     if (e.target.name === "habit-period") el("period-help").textContent = periodHelp(e.target.value);
   });
   function selectClockDigits(e) {

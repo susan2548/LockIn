@@ -124,7 +124,7 @@ public class MainActivity extends Activity {
                 JSONObject e=new JSONObject(raw);
                 String type=e.getString("type");
                 if(!"habit".equals(type) && !"note".equals(type))return;
-                Store.event(MainActivity.this,type,e.optString("id"),e.optString("title"),e.optDouble("value",1),e.optString("note"),"",e.optString("unit"),System.currentTimeMillis());
+                Store.event(MainActivity.this,type,e.optString("id"),e.optString("title"),e.optDouble("value",1),e.optString("note"),"",e.optString("unit"),System.currentTimeMillis(), "habit".equals(type) ? e.optString("icon") : null);
                 Alerts.reschedule(MainActivity.this);
             } catch(JSONException ex){throw new IllegalArgumentException(ex);}
         }
